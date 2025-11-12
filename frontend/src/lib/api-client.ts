@@ -33,14 +33,19 @@ export const api = axios.create({
   },
 });
 
-// Request interceptor to add auth token
+// Request interceptor to add Firebase ID token
 api.interceptors.request.use(
-  (config) => {
+  async (config) => {
     if (typeof window !== 'undefined') {
-      // Check both possible token keys for compatibility
-      const token = localStorage.getItem('custom-auth-token') || localStorage.getItem('authToken');
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
+      try {
+        // Dynamically import authClient to avoid circular dependency
+        const { authClient } = await import('@/lib/auth/client');
+        const token = await authClient.getIdToken();
+        if (token) {
+          config.headers.Authorization = `Bearer ${token}`;
+        }
+      } catch (error) {
+        console.error('Error getting Firebase token:', error);
       }
     }
     return config;

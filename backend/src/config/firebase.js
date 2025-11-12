@@ -22,27 +22,29 @@ let messaging = null;
 
 const initializeFirebase = () => {
     try {
-        // Check if running in production with Firebase
-        if (process.env.FIREBASE_PROJECT_ID && process.env.NODE_ENV === 'production') {
+        // Check if Firebase credentials are configured
+        if (process.env.FIREBASE_PROJECT_ID) {
             // Initialize with service account credentials
             const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT 
                 ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
-                : require('../firebase-service-account.json'); // Fallback to file
+                : require('../../firebase-service-account.json'); // Corrected path
 
-            admin.initializeApp({
-                credential: admin.credential.cert(serviceAccount),
-                projectId: process.env.FIREBASE_PROJECT_ID,
-                storageBucket: process.env.FIREBASE_STORAGE_BUCKET
-            });
+            if (!admin.apps.length) {
+                admin.initializeApp({
+                    credential: admin.credential.cert(serviceAccount),
+                    projectId: process.env.FIREBASE_PROJECT_ID,
+                    storageBucket: process.env.FIREBASE_STORAGE_BUCKET
+                });
+            }
 
             db = admin.firestore();
             storage = admin.storage();
             messaging = admin.messaging();
 
-            console.log('✅ Firebase initialized successfully for production');
+            console.log('✅ Firebase initialized successfully');
             return { db, storage, messaging, isFirebase: true };
         } else {
-            console.log('ℹ️ Running in development mode with SQLite');
+            console.log('ℹ️ Running without Firebase - using SQLite only');
             // Use SQLite for development
             const sqlite = require('./database');
             return { db: sqlite, isFirebase: false };

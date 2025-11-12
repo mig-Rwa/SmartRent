@@ -31,7 +31,7 @@ const schema = zod.object({
 
 type Values = zod.infer<typeof schema>;
 
-const defaultValues = { email: 'sofia@devias.io', password: 'Secret1' } satisfies Values;
+const defaultValues = { email: '', password: '' } satisfies Values;
 
 export function SignInForm(): React.JSX.Element {
   const router = useRouter();
@@ -58,36 +58,29 @@ export function SignInForm(): React.JSX.Element {
 
       const { error } = await authClient.signInWithPassword(values);
 
-      // Fetch user after login
-      const token = localStorage.getItem('custom-auth-token');
-      let userRole = null;
-      if (token) {
-        const res = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } });
-        const data = await res.json();
-        if (data.status === 'success' && data.data && data.data.role) {
-          userRole = data.data.role;
-        }
-      }
-      if (adminMode && userRole !== 'admin') {
-        setAdminError('Only admins can log in here.');
-        setIsPending(false);
-        return;
-      }
-
       if (error) {
         setError('root', { type: 'server', message: error });
         setIsPending(false);
         return;
       }
 
-      // Refresh the auth state
-      await checkSession?.();
+      // Get user data to check role
+      const { data: user } = await authClient.getUser();
+      
+      if (adminMode && user?.role !== 'admin') {
+        setAdminError('Only admins can log in here.');
+        setIsPending(false);
+        return;
+      }
 
-      // UserProvider, for this case, will not refresh the router
-      // After refresh, GuestGuard will handle the redirect
-      router.refresh();
+      // Refresh the auth state - Firebase listener will handle redirect
+      await checkSession?.();
+      
+      setIsPending(false);
+      
+      // GuestGuard will handle the redirect based on user role
     },
-    [adminMode, checkSession, router, setError]
+    [adminMode, checkSession, setError]
   );
 
   return (

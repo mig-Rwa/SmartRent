@@ -74,14 +74,15 @@ export function SignUpForm(): React.JSX.Element {
         return;
       }
 
-      // Refresh the auth state
+      // Refresh the auth state - Firebase listener will handle the redirect
       await checkSession?.();
-
-      // UserProvider, for this case, will not refresh the router
-      // After refresh, GuestGuard will handle the redirect
-      router.refresh();
+      
+      setIsPending(false);
+      
+      // The GuestGuard will automatically redirect based on user role
+      // No need for manual redirect here
     },
-    [checkSession, router, setError]
+    [checkSession, setError]
   );
 
   return (

@@ -25,53 +25,60 @@ export function UserProvider({ children }: UserProviderProps): React.JSX.Element
     error: null,
     isLoading: true,
   });
-  const [isChecking, setIsChecking] = React.useState(false);
+  const checkingRef = React.useRef(false);
 
   const checkSession = React.useCallback(async (): Promise<void> => {
     // Prevent multiple simultaneous checks
-    if (isChecking) {
+    if (checkingRef.current) {
       return;
     }
     
-    setIsChecking(true);
+    checkingRef.current = true;
     
     try {
       const { data, error } = await authClient.getUser();
 
       if (error) {
-        logger.error(error);
-        // Only clear token on 401 Unauthorized (invalid/expired token)
-        // Don't clear on network errors or rate limiting (429)
-        if (error.includes('401') || error.includes('Unauthorized') || error.includes('Invalid token')) {
-          if (typeof window !== 'undefined') {
-            localStorage.removeItem('custom-auth-token');
-          }
-          setState((prev) => ({ ...prev, user: null, error: 'Session expired', isLoading: false }));
-        } else {
-          // For other errors (rate limit, network), keep trying but show error
-          setState((prev) => ({ ...prev, user: null, error: null, isLoading: false }));
-        }
-        setIsChecking(false);
+        logger.error('[UserContext] Error getting user:', error);
+        setState((prev) => ({ ...prev, user: null, error: null, isLoading: false }));
+        checkingRef.current = false;
         return;
       }
 
+      logger.debug('[UserContext] User data:', data);
       setState((prev) => ({ ...prev, user: data ?? null, error: null, isLoading: false }));
-      setIsChecking(false);
+      checkingRef.current = false;
     } catch (error) {
-      logger.error(error);
-      // Don't clear token on network errors - just set loading to false
+      logger.error('[UserContext] Exception getting user:', error);
       setState((prev) => ({ ...prev, user: null, error: null, isLoading: false }));
-      setIsChecking(false);
+      checkingRef.current = false;
     }
-  }, [isChecking]);
+  }, []);
 
   React.useEffect(() => {
-    checkSession().catch((error) => {
-      logger.error(error);
-      // noop
+    logger.debug('[UserContext] Setting up Firebase auth state listener');
+    
+    // Listen to Firebase auth state changes
+    const unsubscribe = authClient.onAuthStateChanged?.(async (user) => {
+      logger.debug('[UserContext] Firebase auth state changed:', user ? 'User logged in' : 'User logged out');
+      
+      if (user) {
+        // User is signed in, fetch full user data
+        await checkSession();
+      } else {
+        // User is signed out
+        setState({ user: null, error: null, isLoading: false });
+      }
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- Expected
-  }, []);
+
+    // Cleanup listener on unmount
+    return () => {
+      if (unsubscribe) {
+        logger.debug('[UserContext] Cleaning up auth state listener');
+        unsubscribe();
+      }
+    };
+  }, [checkSession]);
 
   return <UserContext.Provider value={{ ...state, checkSession }}>{children}</UserContext.Provider>;
 }

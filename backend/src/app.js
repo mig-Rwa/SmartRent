@@ -46,17 +46,8 @@ app.use('/api/leases', require('./routes/leases'));
 app.use('/api/maintenance', require('./routes/maintenance'));
 app.use('/api/notifications', require('./routes/notifications'));
 
-// Legacy fitness routes (can be removed if not needed)
-// app.use('/api/workouts', require('./routes/workouts'));
-// app.use('/api/progress', require('./routes/progress'));
-// app.use('/api/food', require('./routes/food'));
-// app.use('/api/exercises', require('./routes/exercises'));
-// app.use('/api/health-metrics', require('./routes/health-metrics'));
-// app.use('/api/memberships', require('./routes/memberships'));
-// app.use('/api/bookings', require('./routes/bookings'));
-
-// Admin routes (if needed)
-app.use('/api/admin', require('./routes/admin'));
+// Legacy fitness routes (removed)
+// Admin routes (removed)
 
 // Serve uploaded files statically (avatars, property images, maintenance images)
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));

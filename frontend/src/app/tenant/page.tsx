@@ -5,19 +5,35 @@ import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import { useRouter } from 'next/navigation';
+import { authClient } from '@/lib/auth/client';
+import { logger } from '@/lib/default-logger';
 
 export default function Page(): React.JSX.Element {
   const router = useRouter();
+  const [isLoggingOut, setIsLoggingOut] = React.useState(false);
 
-  const handleLogout = () => {
-    // Clear all localStorage items
-    localStorage.removeItem('custom-auth-token');
-    localStorage.removeItem('user-role');
-    localStorage.removeItem('user-data');
-    localStorage.removeItem('authToken');
-    
-    // Force a hard reload to clear all state
-    window.location.href = '/auth/sign-in';
+  const handleLogout = async () => {
+    try {
+      setIsLoggingOut(true);
+      logger.debug('[Tenant Page] Logging out...');
+      
+      // Sign out from Firebase
+      await authClient.signOut();
+      
+      // Clear all localStorage items
+      localStorage.removeItem('custom-auth-token');
+      localStorage.removeItem('user-role');
+      localStorage.removeItem('user-data');
+      localStorage.removeItem('authToken');
+      
+      logger.debug('[Tenant Page] Logout successful, redirecting to sign-in');
+      
+      // Redirect to sign-in page
+      router.push('/auth/sign-in');
+    } catch (error) {
+      logger.error('[Tenant Page] Logout error:', error);
+      setIsLoggingOut(false);
+    }
   };
 
   return (
@@ -52,8 +68,14 @@ export default function Page(): React.JSX.Element {
         </li>
       </ol>
 
-      <Button variant="contained" color="error" onClick={handleLogout} sx={{ mt: 2 }}>
-        Logout & Clear Session
+      <Button 
+        variant="contained" 
+        color="error" 
+        onClick={handleLogout} 
+        disabled={isLoggingOut}
+        sx={{ mt: 2 }}
+      >
+        {isLoggingOut ? 'Logging out...' : 'Logout & Clear Session'}
       </Button>
     </Box>
   );

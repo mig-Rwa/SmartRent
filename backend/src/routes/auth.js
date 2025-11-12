@@ -7,7 +7,7 @@ const config = require('../config/config');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, authenticateFirebaseOnly } = require('../middleware/auth');
 
 // Set up multer storage for avatars
 const avatarStorage = multer.diskStorage({
@@ -104,6 +104,98 @@ router.post('/register', async (req, res) => {
           message: 'Server error'
       });
   }
+});
+
+// Firebase user registration - saves user to SQLite with correct role
+// Uses Firebase-only auth (doesn't require user in DB yet)
+router.post('/firebase-register', authenticateFirebaseOnly, async (req, res) => {
+    try {
+        const { username, first_name, last_name, phone, role } = req.body;
+        const email = req.user.email; // Email comes from Firebase token
+
+        console.log('[Firebase Register] Attempting to register user:', { email, username, role });
+
+        // Validate role
+        const userRole = role && ['landlord', 'tenant'].includes(role) ? role : 'tenant';
+
+        // Check if user already exists in SQLite
+        db.get('SELECT * FROM users WHERE email = ?', [email], (err, existingUser) => {
+            if (err) {
+                console.error('[Firebase Register] Database error:', err);
+                return res.status(500).json({
+                    status: 'error',
+                    message: 'Database error'
+                });
+            }
+
+            if (existingUser) {
+                console.log('[Firebase Register] User already exists, updating role if needed');
+                // Update user role if different
+                if (existingUser.role !== userRole) {
+                    db.run(
+                        'UPDATE users SET role = ?, username = ?, first_name = ?, last_name = ?, phone = ? WHERE email = ?',
+                        [userRole, username || existingUser.username, first_name || existingUser.first_name, 
+                         last_name || existingUser.last_name, phone || existingUser.phone, email],
+                        (updateErr) => {
+                            if (updateErr) {
+                                console.error('[Firebase Register] Error updating user:', updateErr);
+                                return res.status(500).json({
+                                    status: 'error',
+                                    message: 'Error updating user'
+                                });
+                            }
+                            console.log('[Firebase Register] User role updated to:', userRole);
+                            return res.json({
+                                status: 'success',
+                                data: { ...existingUser, role: userRole, username, first_name, last_name, phone }
+                            });
+                        }
+                    );
+                } else {
+                    return res.json({
+                        status: 'success',
+                        data: existingUser
+                    });
+                }
+            } else {
+                // Create new user in SQLite
+                console.log('[Firebase Register] Creating new user with role:', userRole);
+                db.run(
+                    'INSERT INTO users (username, email, role, first_name, last_name, phone) VALUES (?, ?, ?, ?, ?, ?)',
+                    [username || email.split('@')[0], email, userRole, first_name || '', last_name || '', phone || ''],
+                    function(insertErr) {
+                        if (insertErr) {
+                            console.error('[Firebase Register] Error creating user:', insertErr);
+                            return res.status(500).json({
+                                status: 'error',
+                                message: 'Error creating user'
+                            });
+                        }
+
+                        console.log('[Firebase Register] User created successfully with ID:', this.lastID);
+                        res.status(201).json({
+                            status: 'success',
+                            data: {
+                                id: this.lastID,
+                                username: username || email.split('@')[0],
+                                email,
+                                role: userRole,
+                                first_name,
+                                last_name,
+                                phone
+                            }
+                        });
+                    }
+                );
+            }
+        });
+    } catch (error) {
+        console.error('[Firebase Register] Exception:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Server error'
+        });
+    }
 });
 
 // Login user
@@ -242,6 +334,35 @@ router.post('/avatar', authenticateToken, upload.single('avatar'), (req, res) =>
       return res.status(500).json({ status: 'error', message: 'Failed to update avatar' });
     }
     res.json({ status: 'success', avatar: avatarPath });
+  });
+});
+
+// PATCH /api/auth/update-role - Update user role (for fixing mismatched roles)
+router.patch('/update-role', authenticateToken, (req, res) => {
+  const { role } = req.body;
+  
+  if (!role || !['landlord', 'tenant', 'admin'].includes(role)) {
+    return res.status(400).json({
+      status: 'error',
+      message: 'Invalid role. Must be: landlord, tenant, or admin'
+    });
+  }
+  
+  db.run('UPDATE users SET role = ? WHERE id = ?', [role, req.user.userId], function(err) {
+    if (err) {
+      console.error('Error updating role:', err);
+      return res.status(500).json({
+        status: 'error',
+        message: 'Failed to update role'
+      });
+    }
+    
+    console.log(`✅ Updated user ${req.user.email} role to ${role}`);
+    res.json({
+      status: 'success',
+      message: `Role updated to ${role}`,
+      data: { role }
+    });
   });
 });
 

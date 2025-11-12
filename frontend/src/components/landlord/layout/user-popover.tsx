@@ -29,19 +29,32 @@ export function UserPopover({ anchorEl, onClose, open }: UserPopoverProps): Reac
 
   const handleSignOut = React.useCallback(async (): Promise<void> => {
     try {
+      logger.debug('[UserPopover] Signing out...');
+      
       const { error } = await authClient.signOut();
 
       if (error) {
-        logger.error('Sign out error', error);
+        logger.error('[UserPopover] Sign out error:', error);
         return;
       }
 
-      await checkSession?.();
-      router.refresh();
+      // Clear localStorage
+      localStorage.removeItem('custom-auth-token');
+      localStorage.removeItem('user-role');
+      localStorage.removeItem('user-data');
+      localStorage.removeItem('authToken');
+      
+      logger.debug('[UserPopover] Sign out successful, redirecting to sign-in');
+      
+      // Close the popover
+      onClose();
+      
+      // Redirect to sign-in page
+      router.push(paths.auth.signIn);
     } catch (error) {
-      logger.error('Sign out error', error);
+      logger.error('[UserPopover] Sign out error:', error);
     }
-  }, [checkSession, router]);
+  }, [onClose, router]);
 
   const { user } = useUser();
   
