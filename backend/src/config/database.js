@@ -1,12 +1,16 @@
 const sqlite3 = require('sqlite3').verbose();
 const config = require('./config');
 
+// DEPRECATED: This SQLite database is no longer used
+// SmartRent now uses Firestore for all data storage
+// This file is kept temporarily for backward compatibility only
+
 const db = new sqlite3.Database(config.dbPath, (err) => {
     if (err) {
         console.error('Error connecting to database:', err);
         process.exit(1);
     }
-    console.log('Connected to SQLite database for SmartRent');
+    // Removed: console.log('Connected to SQLite database for SmartRent');
 });
 
 // Enable foreign keys

@@ -1,10 +1,45 @@
 # Firebase Setup Guide for SmartRent
 
+## 🎯 Migration Status: SQLite → Firestore (IN PROGRESS)
+
+### ✅ Phase 1: Firestore Setup & Service Layer (COMPLETED)
+- [x] Firestore database enabled (Standard edition, `nam5` region)
+- [x] Created `backend/src/services/firestore.js` - Core Firestore operations
+- [x] Created `backend/src/services/users.service.js` - User CRUD operations
+- [x] Created `backend/src/services/properties.service.js` - Property CRUD operations
+- [x] Created `backend/src/services/leases.service.js` - Lease CRUD operations
+- [x] Created `backend/src/services/maintenance.service.js` - Maintenance CRUD operations
+
+### 🔄 Phase 2: Backend Route Refactoring (NEXT)
+- [ ] Update `backend/src/middleware/auth.js` - Fetch users from Firestore instead of SQLite
+- [ ] Update `backend/src/routes/auth.js` - Replace all SQLite queries with Firestore service calls
+- [ ] Update `backend/src/routes/properties.js` - Use property service
+- [ ] Update `backend/src/routes/leases.js` - Use lease service
+- [ ] Update `backend/src/routes/maintenance.js` - Use maintenance service
+- [ ] Update `backend/src/routes/payments.js` - Add payment service
+- [ ] Update `backend/src/routes/notifications.js` - Add notification service
+
+### ⏳ Phase 3: Data Migration (PENDING)
+- [ ] Create `backend/scripts/export-sqlite-data.js` - Export existing data
+- [ ] Create `backend/scripts/migrate-to-firestore.js` - Import to Firestore
+- [ ] Run migration scripts
+- [ ] Verify data integrity in Firebase Console
+
+### ⏳ Phase 4: Testing & Cleanup (PENDING)
+- [ ] Test all CRUD operations (create, read, update, delete)
+- [ ] Test authentication flows with Firestore
+- [ ] Remove SQLite dependencies from `package.json`
+- [ ] Delete `smartrent.db` and SQLite-related files
+- [ ] Update documentation
+- [ ] Commit and push all changes to GitHub
+
+---
+
 ## Overview
 
-SmartRent uses a **dual-database approach**:
-- **Development**: SQLite (local, file-based database)
-- **Production**: Firebase Firestore (cloud NoSQL database)
+SmartRent is **migrating from SQLite to Firestore**:
+- **OLD (Development)**: SQLite (local, file-based database) ❌
+- **NEW (Production)**: Firebase Firestore (cloud NoSQL database) ✅
 
 ## Firebase Services Used
 

@@ -53,8 +53,8 @@ export function MobileNav({ open, onClose }: MobileNavProps): React.JSX.Element 
       open={open}
     >
       <Stack spacing={2} sx={{ p: 3 }}>
-        <Box component={RouterLink} href="/" sx={{ display: 'inline-flex' }}>
-          <Logo color="light" height={32} width={122} />
+        <Box component={RouterLink} href="/" sx={{ display: 'inline-flex', textDecoration: 'none' }}>
+          <Logo color="light" height={32} width={200} />
         </Box>
       </Stack>
       <Divider sx={{ borderColor: 'var(--mui-palette-neutral-700)' }} />

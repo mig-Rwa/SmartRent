@@ -8,10 +8,9 @@ const path = require('path');
 
 const app = express();
 
-
-// Database connection
-const db = require('./config/database');
-app.set('db', db);
+// Initialize Firebase (moved from database.js)
+const { initializeFirebase } = require('./config/firebase');
+initializeFirebase();
 
 // Security middleware
 app.use(helmet());

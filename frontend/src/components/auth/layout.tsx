@@ -24,8 +24,8 @@ export function Layout({ children }: LayoutProps): React.JSX.Element {
       }}
     >
       <Box sx={{ p: 3 }}>
-        <Box component={RouterLink} href={paths.home} sx={{ display: 'inline-block', fontSize: 0 }}>
-          <Box component="img" src="/images/gtracker-logo.jpg" alt="GTracker logo" height={64} width={240} />
+        <Box component={RouterLink} href={paths.home} sx={{ display: 'inline-block', fontSize: 0, textDecoration: 'none' }}>
+          <DynamicLogo height={64} width={240} />
         </Box>
       </Box>
       <Box sx={{ maxWidth: '450px', width: '100%' }}>{children}</Box>

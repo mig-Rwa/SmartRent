@@ -2,12 +2,12 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const db = require('../config/database');
 const config = require('../config/config');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const { authenticateToken, authenticateFirebaseOnly } = require('../middleware/auth');
+const { getUserService } = require('../services/users.service');
 
 // Set up multer storage for avatars
 const avatarStorage = multer.diskStorage({
@@ -23,7 +23,13 @@ const avatarStorage = multer.diskStorage({
 });
 const upload = multer({ storage: avatarStorage });
 
-// Register new user (with role support)
+// ============================================================================
+// NOTE: /register and /login routes below are LEGACY (SQLite-based) and NOT USED
+// Frontend uses Firebase Auth + /firebase-register instead
+// These routes are kept for backward compatibility but will be removed soon
+// ============================================================================
+
+// Register new user (with role support) - DEPRECATED, use Firebase Auth instead
 router.post('/register', async (req, res) => {
     try {
         const { username, email, password, role, first_name, last_name, phone } = req.body;
@@ -106,94 +112,62 @@ router.post('/register', async (req, res) => {
   }
 });
 
-// Firebase user registration - saves user to SQLite with correct role
+// Firebase user registration - saves user to Firestore with correct role
 // Uses Firebase-only auth (doesn't require user in DB yet)
 router.post('/firebase-register', authenticateFirebaseOnly, async (req, res) => {
     try {
         const { username, first_name, last_name, phone, role } = req.body;
         const email = req.user.email; // Email comes from Firebase token
+        const firebaseUid = req.user.firebaseUid; // Firebase UID
 
-        console.log('[Firebase Register] Attempting to register user:', { email, username, role });
+        console.log('[Firebase Register] Attempting to register user:', { email, username, role, firebaseUid });
 
         // Validate role
-        const userRole = role && ['landlord', 'tenant'].includes(role) ? role : 'tenant';
+        const userRole = role && ['landlord', 'tenant', 'admin'].includes(role) ? role : 'tenant';
 
-        // Check if user already exists in SQLite
-        db.get('SELECT * FROM users WHERE email = ?', [email], (err, existingUser) => {
-            if (err) {
-                console.error('[Firebase Register] Database error:', err);
-                return res.status(500).json({
-                    status: 'error',
-                    message: 'Database error'
-                });
-            }
+        const userService = getUserService();
 
-            if (existingUser) {
-                console.log('[Firebase Register] User already exists, updating role if needed');
-                // Update user role if different
-                if (existingUser.role !== userRole) {
-                    db.run(
-                        'UPDATE users SET role = ?, username = ?, first_name = ?, last_name = ?, phone = ? WHERE email = ?',
-                        [userRole, username || existingUser.username, first_name || existingUser.first_name, 
-                         last_name || existingUser.last_name, phone || existingUser.phone, email],
-                        (updateErr) => {
-                            if (updateErr) {
-                                console.error('[Firebase Register] Error updating user:', updateErr);
-                                return res.status(500).json({
-                                    status: 'error',
-                                    message: 'Error updating user'
-                                });
-                            }
-                            console.log('[Firebase Register] User role updated to:', userRole);
-                            return res.json({
-                                status: 'success',
-                                data: { ...existingUser, role: userRole, username, first_name, last_name, phone }
-                            });
-                        }
-                    );
-                } else {
-                    return res.json({
-                        status: 'success',
-                        data: existingUser
-                    });
-                }
-            } else {
-                // Create new user in SQLite
-                console.log('[Firebase Register] Creating new user with role:', userRole);
-                db.run(
-                    'INSERT INTO users (username, email, role, first_name, last_name, phone) VALUES (?, ?, ?, ?, ?, ?)',
-                    [username || email.split('@')[0], email, userRole, first_name || '', last_name || '', phone || ''],
-                    function(insertErr) {
-                        if (insertErr) {
-                            console.error('[Firebase Register] Error creating user:', insertErr);
-                            return res.status(500).json({
-                                status: 'error',
-                                message: 'Error creating user'
-                            });
-                        }
+        // Check if user already exists in Firestore
+        const existingUser = await userService.getUserById(firebaseUid);
 
-                        console.log('[Firebase Register] User created successfully with ID:', this.lastID);
-                        res.status(201).json({
-                            status: 'success',
-                            data: {
-                                id: this.lastID,
-                                username: username || email.split('@')[0],
-                                email,
-                                role: userRole,
-                                first_name,
-                                last_name,
-                                phone
-                            }
-                        });
-                    }
-                );
-            }
-        });
+        if (existingUser) {
+            console.log('[Firebase Register] User already exists, updating profile if needed');
+            
+            // Update user profile
+            const updatedUser = await userService.updateUser(firebaseUid, {
+                displayName: username || existingUser.displayName,
+                role: userRole, // Always update role to what was selected
+                phoneNumber: phone || existingUser.phoneNumber
+            });
+
+            console.log('[Firebase Register] User updated successfully');
+            return res.json({
+                status: 'success',
+                data: updatedUser
+            });
+        } else {
+            // Create new user in Firestore
+            console.log('[Firebase Register] Creating new user with role:', userRole);
+            
+            const newUser = await userService.createUser(firebaseUid, {
+                email,
+                displayName: username || first_name || email.split('@')[0],
+                role: userRole,
+                phoneNumber: phone || ''
+            });
+
+            console.log('[Firebase Register] User created successfully:', newUser.uid);
+            res.status(201).json({
+                status: 'success',
+                data: newUser
+            });
+        }
     } catch (error) {
         console.error('[Firebase Register] Exception:', error);
         res.status(500).json({
             status: 'error',
-            message: 'Server error'
+            message: 'Server error',
+            details: error.message
         });
     }
 });
@@ -280,82 +254,98 @@ router.post('/login', async (req, res) => {
 });
 
 // Get current user profile
-router.get('/me', authenticateToken, (req, res) => {
-  db.get('SELECT id, username, email, role, first_name, last_name, phone, avatar_url, created_at FROM users WHERE id = ?', 
-    [req.user.userId], (err, user) => {
-    if (err) {
-      console.error('DB error in /me:', err);
-      return res.status(500).json({ status: 'error', message: 'DB error' });
+router.get('/me', authenticateToken, async (req, res) => {
+  try {
+    const userService = getUserService();
+    const user = await userService.getUserById(req.user.userId);
+    
+    if (!user) {
+      return res.status(404).json({ status: 'error', message: 'User not found' });
     }
-    if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
-    res.json({ status: 'success', data: user });
-  });
+    
+    // Format response to match frontend expectations
+    res.json({ 
+      status: 'success', 
+      data: {
+        id: user.uid,
+        username: user.displayName,
+        email: user.email,
+        role: user.role,
+        first_name: user.displayName?.split(' ')[0] || '',
+        last_name: user.displayName?.split(' ').slice(1).join(' ') || '',
+        phone: user.phoneNumber,
+        avatar_url: user.photoURL,
+        created_at: user.createdAt
+      }
+    });
+  } catch (error) {
+    console.error('Error in /me:', error);
+    res.status(500).json({ status: 'error', message: 'Server error' });
+  }
 });
 
 // Update user profile
-router.put('/me', authenticateToken, (req, res) => {
-  const { username, first_name, last_name, phone, email } = req.body;
-  
-  const updates = [];
-  const params = [];
-  
-  if (username) { updates.push('username = ?'); params.push(username); }
-  if (first_name) { updates.push('first_name = ?'); params.push(first_name); }
-  if (last_name) { updates.push('last_name = ?'); params.push(last_name); }
-  if (phone) { updates.push('phone = ?'); params.push(phone); }
-  if (email) { updates.push('email = ?'); params.push(email); }
-  
-  if (updates.length === 0) {
-    return res.status(400).json({ status: 'error', message: 'No fields to update' });
-  }
-  
-  updates.push('updated_at = CURRENT_TIMESTAMP');
-  params.push(req.user.userId);
-  
-  db.run(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params, function(err) {
-    if (err) {
-      console.error('Error updating profile:', err);
-      return res.status(500).json({ status: 'error', message: 'DB error', detail: err.message });
+router.put('/me', authenticateToken, async (req, res) => {
+  try {
+    const { username, first_name, last_name, phone, email } = req.body;
+    
+    const updateData = {};
+    
+    if (username || first_name || last_name) {
+      updateData.displayName = username || `${first_name || ''} ${last_name || ''}`.trim();
     }
+    if (phone) updateData.phoneNumber = phone;
+    if (email) updateData.email = email;
+    
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({ status: 'error', message: 'No fields to update' });
+    }
+    
+    const userService = getUserService();
+    await userService.updateUser(req.user.userId, updateData);
+    
     res.json({ status: 'success', message: 'Profile updated' });
-  });
+  } catch (error) {
+    console.error('Error updating profile:', error);
+    res.status(500).json({ status: 'error', message: 'Server error', detail: error.message });
+  }
 });
 
 // POST /api/auth/avatar - upload profile picture
-router.post('/avatar', authenticateToken, upload.single('avatar'), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ status: 'error', message: 'No file uploaded' });
-  }
-  const avatarPath = `/uploads/avatars/${req.file.filename}`;
-  db.run('UPDATE users SET avatar_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', 
-    [avatarPath, req.user.userId], function (err) {
-    if (err) {
-      console.error('Error updating avatar:', err);
-      return res.status(500).json({ status: 'error', message: 'Failed to update avatar' });
+router.post('/avatar', authenticateToken, upload.single('avatar'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ status: 'error', message: 'No file uploaded' });
     }
+    
+    const avatarPath = `/uploads/avatars/${req.file.filename}`;
+    const userService = getUserService();
+    
+    await userService.updateUser(req.user.userId, {
+      photoURL: avatarPath
+    });
+    
     res.json({ status: 'success', avatar: avatarPath });
-  });
+  } catch (error) {
+    console.error('Error updating avatar:', error);
+    res.status(500).json({ status: 'error', message: 'Failed to update avatar' });
+  }
 });
 
 // PATCH /api/auth/update-role - Update user role (for fixing mismatched roles)
-router.patch('/update-role', authenticateToken, (req, res) => {
-  const { role } = req.body;
-  
-  if (!role || !['landlord', 'tenant', 'admin'].includes(role)) {
-    return res.status(400).json({
-      status: 'error',
-      message: 'Invalid role. Must be: landlord, tenant, or admin'
-    });
-  }
-  
-  db.run('UPDATE users SET role = ? WHERE id = ?', [role, req.user.userId], function(err) {
-    if (err) {
-      console.error('Error updating role:', err);
-      return res.status(500).json({
+router.patch('/update-role', authenticateToken, async (req, res) => {
+  try {
+    const { role } = req.body;
+    
+    if (!role || !['landlord', 'tenant', 'admin'].includes(role)) {
+      return res.status(400).json({
         status: 'error',
-        message: 'Failed to update role'
+        message: 'Invalid role. Must be: landlord, tenant, or admin'
       });
     }
+    
+    const userService = getUserService();
+    await userService.updateUser(req.user.userId, { role });
     
     console.log(`✅ Updated user ${req.user.email} role to ${role}`);
     res.json({
@@ -363,7 +353,13 @@ router.patch('/update-role', authenticateToken, (req, res) => {
       message: `Role updated to ${role}`,
       data: { role }
     });
-  });
+  } catch (error) {
+    console.error('Error updating role:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to update role'
+    });
+  }
 });
 
 module.exports = router; 

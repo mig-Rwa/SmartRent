@@ -105,9 +105,19 @@ export default function Page(): React.JSX.Element {
     <Box sx={{ display: 'flex', gap: 3, minHeight: '100vh' }}>
       {/* Main Content Area */}
       <Box sx={{ flex: 1 }}>
-        <Typography variant="h4" sx={{ mb: 3 }}>
-          Property Overview
-        </Typography>
+        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
+          <Typography variant="h4">
+            Property Overview
+          </Typography>
+          <Button
+            component={RouterLink}
+            href={paths.landlord.properties + '/create'}
+            startIcon={<PlusIcon />}
+            variant="contained"
+          >
+            Add Property
+          </Button>
+        </Stack>
 
         {/* Filters Bar (like course filters) */}
         <Stack direction="row" spacing={2} sx={{ mb: 3 }} flexWrap="wrap">

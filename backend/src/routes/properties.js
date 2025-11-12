@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
+const { getPropertyService } = require('../services/properties.service');
+const { getUserService } = require('../services/users.service');
 const multer = require('multer');
 const path = require('path');
 
@@ -30,282 +31,288 @@ const upload = multer({
 });
 
 // Get all properties (with filters)
-router.get('/', authenticateToken, (req, res) => {
-    const { city, property_type, min_rent, max_rent, status, landlord_id } = req.query;
-    
-    let query = 'SELECT p.*, u.username as landlord_name, u.email as landlord_email, u.phone as landlord_phone FROM properties p JOIN users u ON p.landlord_id = u.id WHERE 1=1';
-    const params = [];
-
-    if (city) {
-        query += ' AND p.city LIKE ?';
-        params.push(`%${city}%`);
-    }
-
-    if (property_type) {
-        query += ' AND p.property_type = ?';
-        params.push(property_type);
-    }
-
-    if (min_rent) {
-        query += ' AND p.rent_amount >= ?';
-        params.push(parseFloat(min_rent));
-    }
-
-    if (max_rent) {
-        query += ' AND p.rent_amount <= ?';
-        params.push(parseFloat(max_rent));
-    }
-
-    if (status) {
-        query += ' AND p.status = ?';
-        params.push(status);
-    }
-
-    if (landlord_id) {
-        query += ' AND p.landlord_id = ?';
-        params.push(parseInt(landlord_id));
-    }
-
-    query += ' ORDER BY p.created_at DESC';
-
-    db.all(query, params, (err, properties) => {
-        if (err) {
-            console.error('Error fetching properties:', err);
-            return res.status(500).json({ error: 'Failed to fetch properties' });
+router.get('/', authenticateToken, async (req, res) => {
+    try {
+        const { city, property_type, min_rent, max_rent, status, landlord_id } = req.query;
+        const { role, userId } = req.user;
+        
+        console.log(`[GET /properties] User: ${userId}, Role: ${role}`);
+        
+        const propertyService = getPropertyService();
+        const userService = getUserService();
+        
+        let properties;
+        
+        // SECURITY: Landlords can only see their own properties
+        if (role === 'landlord') {
+            console.log(`[GET /properties] Filtering properties for landlord: ${userId}`);
+            properties = await propertyService.getPropertiesByLandlord(userId);
+        } 
+        // If landlord_id is provided in query (for tenants/admins), filter by that landlord
+        else if (landlord_id) {
+            console.log(`[GET /properties] Filtering by landlord_id query param: ${landlord_id}`);
+            properties = await propertyService.getPropertiesByLandlord(landlord_id);
+        } 
+        // Admins/tenants can see all properties
+        else {
+            console.log(`[GET /properties] Returning all properties for role: ${role}`);
+            properties = await propertyService.getAllProperties();
         }
-
-        // Parse JSON fields
-        const parsedProperties = properties.map(prop => ({
-            ...prop,
-            images: prop.images ? JSON.parse(prop.images) : [],
-            amenities: prop.amenities ? JSON.parse(prop.amenities) : []
-        }));
-
-        res.json(parsedProperties);
-    });
+        
+        // Apply additional filters
+        const filters = {};
+        if (city) filters.city = city;
+        if (property_type) filters.propertyType = property_type;
+        if (min_rent) filters.minRent = min_rent;
+        if (max_rent) filters.maxRent = max_rent;
+        if (status) filters.status = status;
+        
+        if (Object.keys(filters).length > 0) {
+            properties = await propertyService.searchProperties(filters);
+        }
+        
+        // Enrich properties with landlord details
+        const enrichedProperties = await Promise.all(
+            properties.map(async (property) => {
+                try {
+                    const landlord = await userService.getUserById(property.landlordId);
+                    return {
+                        ...property,
+                        landlord_name: landlord?.displayName || '',
+                        landlord_email: landlord?.email || '',
+                        landlord_phone: landlord?.phoneNumber || '',
+                        landlord_first_name: landlord?.displayName?.split(' ')[0] || '',
+                        landlord_last_name: landlord?.displayName?.split(' ').slice(1).join(' ') || ''
+                    };
+                } catch (error) {
+                    console.error('Error fetching landlord details:', error);
+                    return property;
+                }
+            })
+        );
+        
+        res.json(enrichedProperties);
+    } catch (error) {
+        console.error('Error fetching properties:', error);
+        res.status(500).json({ error: 'Failed to fetch properties', details: error.message });
+    }
 });
 
 // Get property by ID
-router.get('/:id', authenticateToken, (req, res) => {
-    const { id } = req.params;
-
-    const query = `
-        SELECT p.*, 
-               u.username as landlord_name, 
-               u.email as landlord_email, 
-               u.phone as landlord_phone,
-               u.first_name as landlord_first_name,
-               u.last_name as landlord_last_name
-        FROM properties p 
-        JOIN users u ON p.landlord_id = u.id 
-        WHERE p.id = ?
-    `;
-
-    db.get(query, [id], (err, property) => {
-        if (err) {
-            console.error('Error fetching property:', err);
-            return res.status(500).json({ error: 'Failed to fetch property' });
-        }
-
+router.get('/:id', authenticateToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        const propertyService = getPropertyService();
+        const userService = getUserService();
+        
+        const property = await propertyService.getPropertyById(id);
+        
         if (!property) {
             return res.status(404).json({ error: 'Property not found' });
         }
-
-        // Parse JSON fields
-        property.images = property.images ? JSON.parse(property.images) : [];
-        property.amenities = property.amenities ? JSON.parse(property.amenities) : [];
-
-        res.json(property);
-    });
+        
+        // Enrich with landlord details
+        const landlord = await userService.getUserById(property.landlordId);
+        
+        const enrichedProperty = {
+            ...property,
+            landlord_name: landlord?.displayName || '',
+            landlord_email: landlord?.email || '',
+            landlord_phone: landlord?.phoneNumber || '',
+            landlord_first_name: landlord?.displayName?.split(' ')[0] || '',
+            landlord_last_name: landlord?.displayName?.split(' ').slice(1).join(' ') || ''
+        };
+        
+        res.json(enrichedProperty);
+    } catch (error) {
+        console.error('Error fetching property:', error);
+        res.status(500).json({ error: 'Failed to fetch property', details: error.message });
+    }
 });
 
 // Create new property (landlord only)
-router.post('/', authenticateToken, upload.array('images', 10), (req, res) => {
-    const { role, userId } = req.user;
+router.post('/', authenticateToken, upload.array('images', 10), async (req, res) => {
+    try {
+        const { role, userId } = req.user;
 
-    if (role !== 'landlord') {
-        return res.status(403).json({ error: 'Only landlords can create properties' });
-    }
-
-    const {
-        title, description, address, city, state, zip_code,
-        property_type, bedrooms, bathrooms, square_feet,
-        rent_amount, security_deposit, utilities_included,
-        pet_friendly, parking_available, amenities
-    } = req.body;
-
-    // Validation
-    if (!title || !address || !city || !property_type || !rent_amount) {
-        return res.status(400).json({ error: 'Missing required fields' });
-    }
-
-    // Handle uploaded images
-    const imageUrls = req.files ? req.files.map(file => `/uploads/properties/${file.filename}`) : [];
-
-    const query = `
-        INSERT INTO properties (
-            landlord_id, title, description, address, city, state, zip_code,
-            property_type, bedrooms, bathrooms, square_feet, rent_amount,
-            security_deposit, utilities_included, pet_friendly, parking_available,
-            images, amenities
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `;
-
-    const params = [
-        userId, title, description, address, city, state, zip_code,
-        property_type, bedrooms || null, bathrooms || null, square_feet || null,
-        parseFloat(rent_amount), security_deposit || null,
-        utilities_included ? 1 : 0, pet_friendly ? 1 : 0, parking_available ? 1 : 0,
-        JSON.stringify(imageUrls),
-        amenities ? JSON.stringify(amenities) : null
-    ];
-
-    db.run(query, params, function(err) {
-        if (err) {
-            console.error('Error creating property:', err);
-            return res.status(500).json({ error: 'Failed to create property' });
-        }
-
-        res.status(201).json({
-            message: 'Property created successfully',
-            propertyId: this.lastID
-        });
-    });
-});
-
-// Update property (landlord only)
-router.put('/:id', authenticateToken, upload.array('images', 10), (req, res) => {
-    const { role, userId } = req.user;
-    const { id } = req.params;
-
-    if (role !== 'landlord') {
-        return res.status(403).json({ error: 'Only landlords can update properties' });
-    }
-
-    // First verify the property belongs to this landlord
-    db.get('SELECT * FROM properties WHERE id = ? AND landlord_id = ?', [id, userId], (err, property) => {
-        if (err) {
-            console.error('Error fetching property:', err);
-            return res.status(500).json({ error: 'Failed to fetch property' });
-        }
-
-        if (!property) {
-            return res.status(404).json({ error: 'Property not found or unauthorized' });
+        if (role !== 'landlord') {
+            return res.status(403).json({ error: 'Only landlords can create properties' });
         }
 
         const {
-            title, description, address, city, state, zip_code,
-            property_type, bedrooms, bathrooms, square_feet,
-            rent_amount, security_deposit, utilities_included,
-            pet_friendly, parking_available, status, amenities
+            title, description, address, city, state, zipCode,
+            propertyType, bedrooms, bathrooms, squareFeet,
+            monthlyRent, securityDeposit, utilitiesIncluded,
+            petPolicy, parkingSpaces, amenities
+        } = req.body;
+
+        // Validation
+        if (!title || !address || !city || !propertyType || !monthlyRent) {
+            return res.status(400).json({ error: 'Missing required fields: title, address, city, propertyType, monthlyRent' });
+        }
+
+        // Handle uploaded images
+        const imageUrls = req.files ? req.files.map(file => `/uploads/properties/${file.filename}`) : [];
+
+        const propertyData = {
+            landlordId: userId,
+            title,
+            description: description || '',
+            address,
+            city,
+            state: state || '',
+            zipCode: zipCode || '',
+            propertyType,
+            bedrooms: parseInt(bedrooms) || 0,
+            bathrooms: parseFloat(bathrooms) || 0,
+            squareFeet: parseFloat(squareFeet) || 0,
+            monthlyRent: parseFloat(monthlyRent),
+            securityDeposit: parseFloat(securityDeposit) || 0,
+            utilitiesIncluded: Array.isArray(utilitiesIncluded) ? utilitiesIncluded : [],
+            petPolicy: petPolicy || 'no_pets',
+            parkingSpaces: parseInt(parkingSpaces) || 0,
+            images: imageUrls,
+            amenities: Array.isArray(amenities) ? amenities : (amenities ? JSON.parse(amenities) : []),
+            status: 'available'
+        };
+
+        const propertyService = getPropertyService();
+        const newProperty = await propertyService.createProperty(propertyData);
+
+        res.status(201).json({
+            message: 'Property created successfully',
+            propertyId: newProperty.id,
+            property: newProperty
+        });
+    } catch (error) {
+        console.error('Error creating property:', error);
+        res.status(500).json({ error: 'Failed to create property', details: error.message });
+    }
+});
+
+// Update property (landlord only)
+router.put('/:id', authenticateToken, upload.array('images', 10), async (req, res) => {
+    try {
+        const { role, userId } = req.user;
+        const { id } = req.params;
+
+        if (role !== 'landlord') {
+            return res.status(403).json({ error: 'Only landlords can update properties' });
+        }
+
+        const propertyService = getPropertyService();
+        
+        // Verify the property belongs to this landlord
+        const property = await propertyService.getPropertyById(id);
+        
+        if (!property) {
+            return res.status(404).json({ error: 'Property not found' });
+        }
+        
+        if (property.landlordId !== userId) {
+            return res.status(403).json({ error: 'Unauthorized - property does not belong to you' });
+        }
+
+        const {
+            title, description, address, city, state, zipCode,
+            propertyType, bedrooms, bathrooms, squareFeet,
+            monthlyRent, securityDeposit, utilitiesIncluded,
+            petPolicy, parkingSpaces, status, amenities
         } = req.body;
 
         // Handle new images
-        let imageUrls = property.images ? JSON.parse(property.images) : [];
+        let imageUrls = property.images || [];
         if (req.files && req.files.length > 0) {
             const newImages = req.files.map(file => `/uploads/properties/${file.filename}`);
             imageUrls = [...imageUrls, ...newImages];
         }
 
-        const query = `
-            UPDATE properties SET
-                title = COALESCE(?, title),
-                description = COALESCE(?, description),
-                address = COALESCE(?, address),
-                city = COALESCE(?, city),
-                state = COALESCE(?, state),
-                zip_code = COALESCE(?, zip_code),
-                property_type = COALESCE(?, property_type),
-                bedrooms = COALESCE(?, bedrooms),
-                bathrooms = COALESCE(?, bathrooms),
-                square_feet = COALESCE(?, square_feet),
-                rent_amount = COALESCE(?, rent_amount),
-                security_deposit = COALESCE(?, security_deposit),
-                utilities_included = COALESCE(?, utilities_included),
-                pet_friendly = COALESCE(?, pet_friendly),
-                parking_available = COALESCE(?, parking_available),
-                status = COALESCE(?, status),
-                images = ?,
-                amenities = COALESCE(?, amenities),
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-        `;
+        const updateData = {};
+        
+        if (title !== undefined) updateData.title = title;
+        if (description !== undefined) updateData.description = description;
+        if (address !== undefined) updateData.address = address;
+        if (city !== undefined) updateData.city = city;
+        if (state !== undefined) updateData.state = state;
+        if (zipCode !== undefined) updateData.zipCode = zipCode;
+        if (propertyType !== undefined) updateData.propertyType = propertyType;
+        if (bedrooms !== undefined) updateData.bedrooms = parseInt(bedrooms);
+        if (bathrooms !== undefined) updateData.bathrooms = parseFloat(bathrooms);
+        if (squareFeet !== undefined) updateData.squareFeet = parseFloat(squareFeet);
+        if (monthlyRent !== undefined) updateData.monthlyRent = parseFloat(monthlyRent);
+        if (securityDeposit !== undefined) updateData.securityDeposit = parseFloat(securityDeposit);
+        if (utilitiesIncluded !== undefined) updateData.utilitiesIncluded = Array.isArray(utilitiesIncluded) ? utilitiesIncluded : [];
+        if (petPolicy !== undefined) updateData.petPolicy = petPolicy;
+        if (parkingSpaces !== undefined) updateData.parkingSpaces = parseInt(parkingSpaces);
+        if (status !== undefined) updateData.status = status;
+        if (amenities !== undefined) updateData.amenities = Array.isArray(amenities) ? amenities : (amenities ? JSON.parse(amenities) : []);
+        
+        updateData.images = imageUrls;
 
-        const params = [
-            title, description, address, city, state, zip_code,
-            property_type, bedrooms, bathrooms, square_feet,
-            rent_amount ? parseFloat(rent_amount) : null,
-            security_deposit ? parseFloat(security_deposit) : null,
-            utilities_included !== undefined ? (utilities_included ? 1 : 0) : null,
-            pet_friendly !== undefined ? (pet_friendly ? 1 : 0) : null,
-            parking_available !== undefined ? (parking_available ? 1 : 0) : null,
-            status,
-            JSON.stringify(imageUrls),
-            amenities ? JSON.stringify(amenities) : null,
-            id
-        ];
+        const updatedProperty = await propertyService.updateProperty(id, updateData);
 
-        db.run(query, params, function(err) {
-            if (err) {
-                console.error('Error updating property:', err);
-                return res.status(500).json({ error: 'Failed to update property' });
-            }
-
-            res.json({ message: 'Property updated successfully' });
+        res.json({ 
+            message: 'Property updated successfully',
+            property: updatedProperty
         });
-    });
+    } catch (error) {
+        console.error('Error updating property:', error);
+        res.status(500).json({ error: 'Failed to update property', details: error.message });
+    }
 });
 
 // Delete property (landlord only)
-router.delete('/:id', authenticateToken, (req, res) => {
-    const { role, userId } = req.user;
-    const { id } = req.params;
+router.delete('/:id', authenticateToken, async (req, res) => {
+    try {
+        const { role, userId } = req.user;
+        const { id } = req.params;
 
-    if (role !== 'landlord') {
-        return res.status(403).json({ error: 'Only landlords can delete properties' });
-    }
-
-    // Verify the property belongs to this landlord
-    db.run('DELETE FROM properties WHERE id = ? AND landlord_id = ?', [id, userId], function(err) {
-        if (err) {
-            console.error('Error deleting property:', err);
-            return res.status(500).json({ error: 'Failed to delete property' });
+        if (role !== 'landlord') {
+            return res.status(403).json({ error: 'Only landlords can delete properties' });
         }
 
-        if (this.changes === 0) {
-            return res.status(404).json({ error: 'Property not found or unauthorized' });
+        const propertyService = getPropertyService();
+        
+        // Verify the property belongs to this landlord
+        const property = await propertyService.getPropertyById(id);
+        
+        if (!property) {
+            return res.status(404).json({ error: 'Property not found' });
         }
+        
+        if (property.landlordId !== userId) {
+            return res.status(403).json({ error: 'Unauthorized - property does not belong to you' });
+        }
+
+        await propertyService.deleteProperty(id);
 
         res.json({ message: 'Property deleted successfully' });
-    });
+    } catch (error) {
+        console.error('Error deleting property:', error);
+        res.status(500).json({ error: 'Failed to delete property', details: error.message });
+    }
 });
 
 // Get properties by landlord
-router.get('/landlord/:landlordId', authenticateToken, (req, res) => {
-    const { landlordId } = req.params;
-    const { role, userId } = req.user;
+router.get('/landlord/:landlordId', authenticateToken, async (req, res) => {
+    try {
+        const { landlordId } = req.params;
+        const { role, userId } = req.user;
 
-    // Landlords can only see their own properties, tenants can see any landlord's properties
-    if (role === 'landlord' && parseInt(landlordId) !== userId) {
-        return res.status(403).json({ error: 'Unauthorized' });
-    }
-
-    const query = 'SELECT * FROM properties WHERE landlord_id = ? ORDER BY created_at DESC';
-
-    db.all(query, [landlordId], (err, properties) => {
-        if (err) {
-            console.error('Error fetching properties:', err);
-            return res.status(500).json({ error: 'Failed to fetch properties' });
+        // Landlords can only see their own properties, tenants can see any landlord's properties
+        if (role === 'landlord' && landlordId !== userId) {
+            return res.status(403).json({ error: 'Unauthorized' });
         }
 
-        const parsedProperties = properties.map(prop => ({
-            ...prop,
-            images: prop.images ? JSON.parse(prop.images) : [],
-            amenities: prop.amenities ? JSON.parse(prop.amenities) : []
-        }));
+        const propertyService = getPropertyService();
+        const properties = await propertyService.getPropertiesByLandlord(landlordId);
 
-        res.json(parsedProperties);
-    });
+        res.json(properties);
+    } catch (error) {
+        console.error('Error fetching properties:', error);
+        res.status(500).json({ error: 'Failed to fetch properties', details: error.message });
+    }
 });
 
 module.exports = router;
