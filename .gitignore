@@ -1,0 +1,36 @@
+# dependencies
+node_modules/
+.pnp.cjs
+.pnp.loader.mjs
+
+# Next.js build output
+.next/
+dist/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Env / secrets
+.env*
+backend/.env
+.env.local
+.env.production
+
+# Firebase
+firebase-service-account.json
+.firebase/
+.firebaserc
+
+# Local databases / dumps
+*.db
+*.sqlite
+*.sqlite3
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+backend/.env
+frontend/.env

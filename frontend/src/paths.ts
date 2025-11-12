@@ -1,0 +1,40 @@
+export const paths = {
+  home: '/',
+  auth: { 
+    signIn: '/auth/sign-in', 
+    signUp: '/auth/sign-up', 
+    resetPassword: '/auth/reset-password' 
+  },
+  // Landlord Dashboard
+  landlord: {
+    overview: '/landlord',
+    properties: '/landlord/properties',
+    leases: '/landlord/leases',
+    tenants: '/landlord/tenants',
+    maintenance: '/landlord/maintenance',
+    payments: '/landlord/payments',
+    account: '/landlord/account',
+    settings: '/landlord/settings',
+  },
+  // Tenant Dashboard
+  tenant: {
+    overview: '/tenant',
+    myLease: '/tenant/my-lease',
+    maintenance: '/tenant/maintenance',
+    payments: '/tenant/payments',
+    documents: '/tenant/documents',
+    account: '/tenant/account',
+  },
+  // Generic dashboard (redirects based on role)
+  dashboard: {
+    overview: '/dashboard',
+    properties: '/dashboard/properties',
+    leases: '/dashboard/leases',
+    maintenance: '/dashboard/maintenance',
+    payments: '/dashboard/payments',
+    tenants: '/dashboard/tenants',
+    account: '/dashboard/account',
+    settings: '/dashboard/settings',
+  },
+  errors: { notFound: '/errors/not-found' },
+} as const;
