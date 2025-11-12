@@ -38,6 +38,11 @@ class UserService {
                 updatedAt: new Date().toISOString()
             };
 
+            // Add landlordId for tenants
+            if (userData.landlordId) {
+                user.landlordId = userData.landlordId;
+            }
+
             await this.firestore.set(this.collection, uid, user, false);
             return user;
         } catch (error) {

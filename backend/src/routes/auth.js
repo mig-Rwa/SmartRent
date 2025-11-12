@@ -116,16 +116,46 @@ router.post('/register', async (req, res) => {
 // Uses Firebase-only auth (doesn't require user in DB yet)
 router.post('/firebase-register', authenticateFirebaseOnly, async (req, res) => {
     try {
-        const { username, first_name, last_name, phone, role } = req.body;
+        const { username, first_name, last_name, phone, role, landlordCode } = req.body;
         const email = req.user.email; // Email comes from Firebase token
         const firebaseUid = req.user.firebaseUid; // Firebase UID
 
-        console.log('[Firebase Register] Attempting to register user:', { email, username, role, firebaseUid });
+        console.log('[Firebase Register] Attempting to register user:', { email, username, role, firebaseUid, landlordCode });
 
         // Validate role
         const userRole = role && ['landlord', 'tenant', 'admin'].includes(role) ? role : 'tenant';
 
         const userService = getUserService();
+
+        // If tenant, validate landlordCode
+        let landlordId = null;
+        if (userRole === 'tenant') {
+            if (!landlordCode) {
+                return res.status(400).json({
+                    status: 'error',
+                    message: 'Landlord ID is required for tenant registration'
+                });
+            }
+
+            // Verify landlord exists
+            const landlord = await userService.getUserById(landlordCode);
+            if (!landlord) {
+                return res.status(404).json({
+                    status: 'error',
+                    message: 'Invalid Landlord ID. Please check with your landlord and try again.'
+                });
+            }
+
+            if (landlord.role !== 'landlord') {
+                return res.status(400).json({
+                    status: 'error',
+                    message: 'The provided ID does not belong to a landlord.'
+                });
+            }
+
+            landlordId = landlordCode;
+            console.log('[Firebase Register] Tenant will be linked to landlord:', landlordId);
+        }
 
         // Check if user already exists in Firestore
         const existingUser = await userService.getUserById(firebaseUid);
@@ -134,11 +164,18 @@ router.post('/firebase-register', authenticateFirebaseOnly, async (req, res) => 
             console.log('[Firebase Register] User already exists, updating profile if needed');
             
             // Update user profile
-            const updatedUser = await userService.updateUser(firebaseUid, {
+            const updateData = {
                 displayName: username || existingUser.displayName,
                 role: userRole, // Always update role to what was selected
                 phoneNumber: phone || existingUser.phoneNumber
-            });
+            };
+
+            // Update landlordId for tenants
+            if (userRole === 'tenant' && landlordId) {
+                updateData.landlordId = landlordId;
+            }
+
+            const updatedUser = await userService.updateUser(firebaseUid, updateData);
 
             console.log('[Firebase Register] User updated successfully');
             return res.json({
@@ -149,12 +186,19 @@ router.post('/firebase-register', authenticateFirebaseOnly, async (req, res) => 
             // Create new user in Firestore
             console.log('[Firebase Register] Creating new user with role:', userRole);
             
-            const newUser = await userService.createUser(firebaseUid, {
+            const userData = {
                 email,
                 displayName: username || first_name || email.split('@')[0],
                 role: userRole,
                 phoneNumber: phone || ''
-            });
+            };
+
+            // Add landlordId for tenants
+            if (userRole === 'tenant' && landlordId) {
+                userData.landlordId = landlordId;
+            }
+
+            const newUser = await userService.createUser(firebaseUid, userData);
 
             console.log('[Firebase Register] User created successfully:', newUser.uid);
             res.status(201).json({

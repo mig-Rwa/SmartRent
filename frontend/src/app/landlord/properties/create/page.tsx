@@ -192,7 +192,7 @@ export default function CreatePropertyPage() {
                     Basic Information
                   </Typography>
                   <Grid container spacing={3} sx={{ mt: 1 }}>
-                    <Grid item xs={12}>
+                    <Grid xs={12}>
                       <TextField
                         fullWidth
                         label="Property Title"
@@ -203,7 +203,7 @@ export default function CreatePropertyPage() {
                         placeholder="e.g., Modern 2BR Apartment in Downtown"
                       />
                     </Grid>
-                    <Grid item xs={12}>
+                    <Grid xs={12}>
                       <TextField
                         fullWidth
                         label="Description"
@@ -215,7 +215,7 @@ export default function CreatePropertyPage() {
                         placeholder="Describe your property..."
                       />
                     </Grid>
-                    <Grid item xs={12} md={6}>
+                    <Grid xs={12} md={6}>
                       <FormControl fullWidth required>
                         <InputLabel>Property Type</InputLabel>
                         <Select
@@ -242,7 +242,7 @@ export default function CreatePropertyPage() {
                     Location
                   </Typography>
                   <Grid container spacing={3} sx={{ mt: 1 }}>
-                    <Grid item xs={12}>
+                    <Grid xs={12}>
                       <TextField
                         fullWidth
                         label="Street Address"
@@ -253,7 +253,7 @@ export default function CreatePropertyPage() {
                         placeholder="123 Main Street"
                       />
                     </Grid>
-                    <Grid item xs={12} md={4}>
+                    <Grid xs={12} md={4}>
                       <TextField
                         fullWidth
                         label="City"
@@ -263,7 +263,7 @@ export default function CreatePropertyPage() {
                         onChange={handleChange('city')}
                       />
                     </Grid>
-                    <Grid item xs={12} md={4}>
+                    <Grid xs={12} md={4}>
                       <TextField
                         fullWidth
                         label="State"
@@ -272,7 +272,7 @@ export default function CreatePropertyPage() {
                         onChange={handleChange('state')}
                       />
                     </Grid>
-                    <Grid item xs={12} md={4}>
+                    <Grid xs={12} md={4}>
                       <TextField
                         fullWidth
                         label="ZIP Code"
@@ -292,7 +292,7 @@ export default function CreatePropertyPage() {
                     Property Details
                   </Typography>
                   <Grid container spacing={3} sx={{ mt: 1 }}>
-                    <Grid item xs={12} md={4}>
+                    <Grid xs={12} md={4}>
                       <TextField
                         fullWidth
                         label="Bedrooms"
@@ -304,7 +304,7 @@ export default function CreatePropertyPage() {
                         inputProps={{ min: 0 }}
                       />
                     </Grid>
-                    <Grid item xs={12} md={4}>
+                    <Grid xs={12} md={4}>
                       <TextField
                         fullWidth
                         label="Bathrooms"
@@ -316,7 +316,7 @@ export default function CreatePropertyPage() {
                         inputProps={{ min: 0, step: 0.5 }}
                       />
                     </Grid>
-                    <Grid item xs={12} md={4}>
+                    <Grid xs={12} md={4}>
                       <TextField
                         fullWidth
                         label="Square Feet"
@@ -327,7 +327,7 @@ export default function CreatePropertyPage() {
                         inputProps={{ min: 0 }}
                       />
                     </Grid>
-                    <Grid item xs={12} md={4}>
+                    <Grid xs={12} md={4}>
                       <TextField
                         fullWidth
                         label="Monthly Rent ($)"
@@ -339,7 +339,7 @@ export default function CreatePropertyPage() {
                         inputProps={{ min: 0, step: 0.01 }}
                       />
                     </Grid>
-                    <Grid item xs={12} md={4}>
+                    <Grid xs={12} md={4}>
                       <TextField
                         fullWidth
                         label="Security Deposit ($)"
@@ -350,7 +350,7 @@ export default function CreatePropertyPage() {
                         inputProps={{ min: 0, step: 0.01 }}
                       />
                     </Grid>
-                    <Grid item xs={12} md={4}>
+                    <Grid xs={12} md={4}>
                       <TextField
                         fullWidth
                         label="Parking Spaces"
@@ -372,7 +372,7 @@ export default function CreatePropertyPage() {
                     Amenities & Policies
                   </Typography>
                   <Grid container spacing={3} sx={{ mt: 1 }}>
-                    <Grid item xs={12} md={6}>
+                    <Grid xs={12} md={6}>
                       <FormControl fullWidth>
                         <InputLabel>Pet Policy</InputLabel>
                         <Select
@@ -388,7 +388,7 @@ export default function CreatePropertyPage() {
                         </Select>
                       </FormControl>
                     </Grid>
-                    <Grid item xs={12} md={6}>
+                    <Grid xs={12} md={6}>
                       <FormControl fullWidth>
                         <InputLabel>Amenities</InputLabel>
                         <Select
@@ -413,7 +413,7 @@ export default function CreatePropertyPage() {
                         </Select>
                       </FormControl>
                     </Grid>
-                    <Grid item xs={12}>
+                    <Grid xs={12}>
                       <FormControl fullWidth>
                         <InputLabel>Utilities Included</InputLabel>
                         <Select

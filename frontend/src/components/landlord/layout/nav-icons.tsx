@@ -6,6 +6,7 @@ import { UsersIcon } from '@phosphor-icons/react/dist/ssr/Users';
 import { WrenchIcon } from '@phosphor-icons/react/dist/ssr/Wrench';
 import { CurrencyDollarIcon } from '@phosphor-icons/react/dist/ssr/CurrencyDollar';
 import { UserIcon } from '@phosphor-icons/react/dist/ssr/User';
+import { GearSixIcon } from '@phosphor-icons/react/dist/ssr/GearSix';
 
 export const navIcons = {
   'chart-pie': ChartPieIcon,
@@ -15,4 +16,5 @@ export const navIcons = {
   'wrench': WrenchIcon,
   'currency-dollar': CurrencyDollarIcon,
   'user': UserIcon,
+  'gear-six': GearSixIcon,
 } as Record<string, Icon>;

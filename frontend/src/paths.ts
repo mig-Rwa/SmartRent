@@ -18,12 +18,18 @@ export const paths = {
   },
   // Tenant Dashboard
   tenant: {
+    dashboard: '/tenant',
     overview: '/tenant',
-    myLease: '/tenant/my-lease',
+    properties: '/tenant/properties',
+    applications: '/tenant/applications',
+    lease: '/tenant/lease',
     maintenance: '/tenant/maintenance',
     payments: '/tenant/payments',
     documents: '/tenant/documents',
     account: '/tenant/account',
+    settings: '/tenant/settings',
+    // Legacy
+    myLease: '/tenant/my-lease',
   },
   // Generic dashboard (redirects based on role)
   dashboard: {

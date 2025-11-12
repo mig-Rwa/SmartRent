@@ -32,7 +32,17 @@ const schema = zod.object({
   password: zod.string().min(6, { message: 'Password should be at least 6 characters' }),
   phone: zod.string().optional(),
   role: zod.enum(['landlord', 'tenant'], { message: 'Please select your role' }),
+  landlordCode: zod.string().optional(),
   terms: zod.boolean().refine((value) => value, 'You must accept the terms and conditions'),
+}).refine((data) => {
+  // If role is tenant, landlordCode is required
+  if (data.role === 'tenant' && !data.landlordCode) {
+    return false;
+  }
+  return true;
+}, {
+  message: 'Landlord ID is required for tenants',
+  path: ['landlordCode'],
 });
 
 type Values = zod.infer<typeof schema>;
@@ -45,6 +55,7 @@ const defaultValues = {
   password: '', 
   phone: '',
   role: 'tenant' as 'landlord' | 'tenant',
+  landlordCode: '',
   terms: false 
 } satisfies Values;
 
@@ -59,8 +70,11 @@ export function SignUpForm(): React.JSX.Element {
     control,
     handleSubmit,
     setError,
+    watch,
     formState: { errors },
   } = useForm<Values>({ defaultValues, resolver: zodResolver(schema) });
+
+  const selectedRole = watch('role');
 
   const onSubmit = React.useCallback(
     async (values: Values): Promise<void> => {
@@ -167,6 +181,29 @@ export function SignUpForm(): React.JSX.Element {
               </FormControl>
             )}
           />
+          {selectedRole === 'tenant' && (
+            <Controller
+              control={control}
+              name="landlordCode"
+              render={({ field }) => (
+                <FormControl error={Boolean(errors.landlordCode)}>
+                  <InputLabel>Landlord ID *</InputLabel>
+                  <OutlinedInput 
+                    {...field} 
+                    label="Landlord ID *" 
+                    placeholder="Enter your landlord's unique ID"
+                  />
+                  {errors.landlordCode ? (
+                    <FormHelperText>{errors.landlordCode.message}</FormHelperText>
+                  ) : (
+                    <FormHelperText>
+                      Ask your landlord for their unique ID to join their property system
+                    </FormHelperText>
+                  )}
+                </FormControl>
+              )}
+            />
+          )}
           <Controller
             control={control}
             name="password"

@@ -9,4 +9,5 @@ export const landlordNavItems = [
   { key: 'maintenance', title: 'Maintenance', href: paths.landlord.maintenance, icon: 'wrench' },
   { key: 'payments', title: 'Payments', href: paths.landlord.payments, icon: 'currency-dollar' },
   { key: 'account', title: 'Account', href: paths.landlord.account, icon: 'user' },
+  { key: 'settings', title: 'Settings', href: paths.landlord.settings, icon: 'gear-six' },
 ] satisfies NavItemConfig[];

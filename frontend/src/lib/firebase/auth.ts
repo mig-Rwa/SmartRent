@@ -109,6 +109,7 @@ export async function signUpWithEmail(
     lastName: string;
     phone?: string;
     role: 'landlord' | 'tenant';
+    landlordCode?: string;
   }
 ) {
   try {
@@ -121,7 +122,7 @@ export async function signUpWithEmail(
       displayName: `${userData.firstName} ${userData.lastName}`
     });
 
-    // Call backend to register user in SQLite database (REQUIRED for role)
+    // Call backend to register user in Firestore database (REQUIRED for role)
     try {
       const token = await user.getIdToken();
       const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
@@ -136,7 +137,8 @@ export async function signUpWithEmail(
           first_name: userData.firstName,
           last_name: userData.lastName,
           phone: userData.phone || '',
-          role: userData.role
+          role: userData.role,
+          landlordCode: userData.landlordCode
         })
       });
       
@@ -146,6 +148,9 @@ export async function signUpWithEmail(
       } else {
         const errorData = await response.json();
         console.error('❌ Backend registration failed:', errorData);
+        // Delete Firebase user if backend registration fails
+        await user.delete();
+        return { error: errorData.message || 'Registration failed. Please check your landlord ID.' };
       }
     } catch (backendError) {
       console.error('⚠️ Backend registration error:', backendError);

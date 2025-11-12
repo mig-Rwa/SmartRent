@@ -48,12 +48,24 @@ router.get('/', authenticateToken, async (req, res) => {
             console.log(`[GET /properties] Filtering properties for landlord: ${userId}`);
             properties = await propertyService.getPropertiesByLandlord(userId);
         } 
-        // If landlord_id is provided in query (for tenants/admins), filter by that landlord
+        // TENANTS: Only see properties from their assigned landlord
+        else if (role === 'tenant') {
+            // Get tenant's landlordId
+            const tenant = await userService.getUserById(userId);
+            if (tenant && tenant.landlordId) {
+                console.log(`[GET /properties] Filtering properties for tenant's landlord: ${tenant.landlordId}`);
+                properties = await propertyService.getPropertiesByLandlord(tenant.landlordId);
+            } else {
+                console.log(`[GET /properties] Tenant has no assigned landlord`);
+                properties = [];
+            }
+        }
+        // If landlord_id is provided in query (for admins), filter by that landlord
         else if (landlord_id) {
             console.log(`[GET /properties] Filtering by landlord_id query param: ${landlord_id}`);
             properties = await propertyService.getPropertiesByLandlord(landlord_id);
         } 
-        // Admins/tenants can see all properties
+        // Admins can see all properties
         else {
             console.log(`[GET /properties] Returning all properties for role: ${role}`);
             properties = await propertyService.getAllProperties();

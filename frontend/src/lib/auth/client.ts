@@ -22,6 +22,7 @@ export interface SignUpParams {
   password: string;
   phone?: string;
   role: 'landlord' | 'tenant';
+  landlordCode?: string;
 }
 
 export interface SignInWithOAuthParams {
@@ -39,7 +40,7 @@ export interface ResetPasswordParams {
 
 class AuthClient {
   async signUp(params: SignUpParams): Promise<{ error?: string }> {
-    const { username, firstName, lastName, email, password, phone, role } = params;
+    const { username, firstName, lastName, email, password, phone, role, landlordCode } = params;
     
     // Use Firebase authentication
     const result = await signUpWithEmail(email, password, {
@@ -47,7 +48,8 @@ class AuthClient {
       firstName,
       lastName,
       phone,
-      role
+      role,
+      landlordCode
     });
 
     if (result.error) {

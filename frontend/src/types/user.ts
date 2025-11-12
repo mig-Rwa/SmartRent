@@ -8,6 +8,7 @@ export interface User {
   phone?: string;
   avatar_url?: string;
   created_at?: string;
+  landlord_id?: string; // For tenants: ID of their assigned landlord
 
   // Computed properties for backwards compatibility
   name?: string; // Will be computed from first_name + last_name
