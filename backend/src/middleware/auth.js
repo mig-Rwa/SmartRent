@@ -1,21 +1,20 @@
 const config = require('../config/config');
-const { initializeFirebase } = require('../config/firebase');
+const { initializeFirebase, admin } = require('../config/firebase');
 const { getUserService } = require('../services/users.service');
 
 // Initialize Firebase Admin
-const USE_FIREBASE = Boolean(process.env.FIREBASE_PROJECT_ID);
-let admin = null;
+let firebaseReady = false;
 
-if (USE_FIREBASE) {
-    try {
-        const firebaseConfig = initializeFirebase();
-        if (firebaseConfig.isFirebase) {
-            admin = require('firebase-admin');
-            console.log('✅ Firebase Admin initialized for authentication');
-        }
-    } catch (error) {
-        console.error('⚠️ Firebase initialization failed:', error.message);
+try {
+    const firebaseConfig = initializeFirebase();
+    if (firebaseConfig.isFirebase) {
+        firebaseReady = true;
+        console.log('✅ Firebase Admin ready for authentication');
+    } else {
+        console.error('❌ Firebase is NOT configured - authentication will fail');
     }
+} catch (error) {
+    console.error('⚠️ Firebase initialization failed in auth middleware:', error.message);
 }
 
 const authenticateToken = async (req, res, next) => {
@@ -28,10 +27,11 @@ const authenticateToken = async (req, res, next) => {
             });
         }
 
-        const token = authHeader.replace('Bearer ', '');
+        const token = authHeader.replace('Bearer ', '').trim();
         
         // Verify Firebase token
-        if (!USE_FIREBASE || !admin) {
+        if (!firebaseReady || !admin) {
+            console.error('[Auth] Firebase not ready!');
             return res.status(500).json({
                 status: 'error',
                 message: 'Firebase authentication not configured'
@@ -41,6 +41,8 @@ const authenticateToken = async (req, res, next) => {
         try {
             const decodedToken = await admin.auth().verifyIdToken(token);
             const userId = decodedToken.uid;
+            
+            console.log('[Auth] Token verified for:', decodedToken.email);
             
             // Get user from Firestore
             const userService = getUserService();
@@ -67,14 +69,16 @@ const authenticateToken = async (req, res, next) => {
             
             return next();
         } catch (firebaseError) {
-            console.error('Firebase token verification failed:', firebaseError.message);
+            console.error('[Auth] Firebase token verification failed:', firebaseError.message);
+            console.error('[Auth] Error code:', firebaseError.code);
             return res.status(401).json({
                 status: 'error',
-                message: 'Invalid authentication token'
+                message: 'Invalid authentication token',
+                details: firebaseError.message
             });
         }
     } catch (error) {
-        console.error('Authentication error:', error);
+        console.error('[Auth] Authentication error:', error);
         res.status(401).json({
             status: 'error',
             message: 'Please authenticate'
@@ -108,6 +112,13 @@ const requireTenant = (req, res, next) => {
 const authenticateFirebaseOnly = async (req, res, next) => {
     try {
         const authHeader = req.header('Authorization');
+        
+        console.log('[FirebaseOnly Auth] Headers:', {
+            hasAuth: !!authHeader,
+            firebaseReady,
+            hasAdmin: !!admin
+        });
+        
         if (!authHeader) {
             return res.status(401).json({ 
                 status: 'error', 
@@ -115,39 +126,48 @@ const authenticateFirebaseOnly = async (req, res, next) => {
             });
         }
 
-        const token = authHeader.replace('Bearer ', '');
+        const token = authHeader.replace('Bearer ', '').trim();
+        
+        console.log('[FirebaseOnly Auth] Token length:', token.length);
         
         // Verify Firebase token
-        if (USE_FIREBASE && admin) {
-            try {
-                const decodedToken = await admin.auth().verifyIdToken(token);
-                
-                // Attach Firebase user info to request (no DB check)
-                req.user = {
-                    email: decodedToken.email,
-                    firebaseUid: decodedToken.uid,
-                    name: decodedToken.name || ''
-                };
-                
-                return next();
-            } catch (firebaseError) {
-                console.error('Firebase token verification failed:', firebaseError.message);
-                return res.status(401).json({
-                    status: 'error',
-                    message: 'Invalid Firebase token'
-                });
-            }
+        if (!firebaseReady || !admin) {
+            console.error('[FirebaseOnly Auth] Firebase not ready!');
+            return res.status(500).json({
+                status: 'error',
+                message: 'Firebase authentication not configured'
+            });
         }
-        
-        return res.status(401).json({
-            status: 'error',
-            message: 'Firebase authentication not configured'
-        });
+
+        try {
+            console.log('[FirebaseOnly Auth] Verifying token...');
+            const decodedToken = await admin.auth().verifyIdToken(token);
+            
+            console.log('[FirebaseOnly Auth] ✅ Token verified for:', decodedToken.email);
+            
+            // Attach Firebase user info to request (no DB check)
+            req.user = {
+                email: decodedToken.email,
+                firebaseUid: decodedToken.uid,
+                name: decodedToken.name || ''
+            };
+            
+            return next();
+        } catch (firebaseError) {
+            console.error('[FirebaseOnly Auth] ❌ Token verification failed:', firebaseError.message);
+            console.error('[FirebaseOnly Auth] Error code:', firebaseError.code);
+            return res.status(401).json({
+                status: 'error',
+                message: 'Invalid Firebase token',
+                details: firebaseError.message
+            });
+        }
     } catch (error) {
-        console.error('Authentication error:', error);
+        console.error('[FirebaseOnly Auth] Exception:', error);
         res.status(401).json({
             status: 'error',
-            message: 'Please authenticate'
+            message: 'Authentication error',
+            details: error.message
         });
     }
 };
@@ -161,4 +181,4 @@ module.exports = {
     authenticateFirebaseOnly,
     requireLandlord,
     requireTenant
-}; 
+};

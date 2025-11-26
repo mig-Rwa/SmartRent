@@ -44,6 +44,7 @@ app.use('/api/properties', require('./routes/properties'));
 app.use('/api/leases', require('./routes/leases'));
 app.use('/api/maintenance', require('./routes/maintenance'));
 app.use('/api/notifications', require('./routes/notifications'));
+app.use('/api/landlords', require('./routes/landlords'));
 
 // Legacy fitness routes (removed)
 // Admin routes (removed)

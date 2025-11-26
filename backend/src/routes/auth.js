@@ -114,107 +114,104 @@ router.post('/register', async (req, res) => {
 
 // Firebase user registration - saves user to Firestore with correct role
 // Uses Firebase-only auth (doesn't require user in DB yet)
+// Firebase user registration - saves user to Firestore with correct role
 router.post('/firebase-register', authenticateFirebaseOnly, async (req, res) => {
-    try {
-        const { username, first_name, last_name, phone, role, landlordCode } = req.body;
-        const email = req.user.email; // Email comes from Firebase token
-        const firebaseUid = req.user.firebaseUid; // Firebase UID
+  try {
+    const { username, first_name, last_name, phone, role, landlordCode } = req.body;
 
-        console.log('[Firebase Register] Attempting to register user:', { email, username, role, firebaseUid, landlordCode });
+    const email = req.user.email;
+    const firebaseUid = req.user.firebaseUid;
 
-        // Validate role
-        const userRole = role && ['landlord', 'tenant', 'admin'].includes(role) ? role : 'tenant';
+    console.log('\n[Firebase Register] Registering user:', {
+      email,
+      firebaseUid,
+      username,
+      role,
+      landlordCode
+    });
 
-        const userService = getUserService();
+    const userRole = ['landlord', 'tenant', 'admin'].includes(role) ? role : 'tenant';
+    const userService = getUserService();
 
-        // If tenant, validate landlordCode
-        let landlordId = null;
-        if (userRole === 'tenant') {
-            if (!landlordCode) {
-                return res.status(400).json({
-                    status: 'error',
-                    message: 'Landlord ID is required for tenant registration'
-                });
-            }
+    let landlordId = null;
 
-            // Verify landlord exists
-            const landlord = await userService.getUserById(landlordCode);
-            if (!landlord) {
-                return res.status(404).json({
-                    status: 'error',
-                    message: 'Invalid Landlord ID. Please check with your landlord and try again.'
-                });
-            }
+    // Tenant CAN provide a landlord (optional during signup)
+    if (userRole === 'tenant' && landlordCode) {
+      console.log('[Firebase Register] Validating landlord:', landlordCode);
 
-            if (landlord.role !== 'landlord') {
-                return res.status(400).json({
-                    status: 'error',
-                    message: 'The provided ID does not belong to a landlord.'
-                });
-            }
+      const landlord = await userService.getUserById(landlordCode).catch(() => null);
 
-            landlordId = landlordCode;
-            console.log('[Firebase Register] Tenant will be linked to landlord:', landlordId);
-        }
-
-        // Check if user already exists in Firestore
-        const existingUser = await userService.getUserById(firebaseUid);
-
-        if (existingUser) {
-            console.log('[Firebase Register] User already exists, updating profile if needed');
-            
-            // Update user profile
-            const updateData = {
-                displayName: username || existingUser.displayName,
-                role: userRole, // Always update role to what was selected
-                phoneNumber: phone || existingUser.phoneNumber
-            };
-
-            // Update landlordId for tenants
-            if (userRole === 'tenant' && landlordId) {
-                updateData.landlordId = landlordId;
-            }
-
-            const updatedUser = await userService.updateUser(firebaseUid, updateData);
-
-            console.log('[Firebase Register] User updated successfully');
-            return res.json({
-                status: 'success',
-                data: updatedUser
-            });
-        } else {
-            // Create new user in Firestore
-            console.log('[Firebase Register] Creating new user with role:', userRole);
-            
-            const userData = {
-                email,
-                displayName: username || first_name || email.split('@')[0],
-                role: userRole,
-                phoneNumber: phone || ''
-            };
-
-            // Add landlordId for tenants
-            if (userRole === 'tenant' && landlordId) {
-                userData.landlordId = landlordId;
-            }
-
-            const newUser = await userService.createUser(firebaseUid, userData);
-
-            console.log('[Firebase Register] User created successfully:', newUser.uid);
-            res.status(201).json({
-                status: 'success',
-                data: newUser
-            });
-        }
-    } catch (error) {
-        console.error('[Firebase Register] Exception:', error);
-        res.status(500).json({
-            status: 'error',
-            message: 'Server error',
-            details: error.message
-        });
+      if (!landlord || landlord.role !== 'landlord') {
+        console.warn('[Firebase Register] Invalid landlord code provided:', landlordCode);
+        // Don't block registration - just don't assign landlord
+        landlordId = null;
+      } else {
+        landlordId = landlordCode;
+      }
     }
+
+    // Check if user exists
+    const existingUser = await userService.getUserById(firebaseUid).catch(() => null);
+
+    if (!existingUser) {
+      console.log('[Firebase Register] Creating new Firestore user');
+
+      const userData = {
+        uid: firebaseUid,
+        email,
+        displayName: username || first_name || email.split('@')[0],
+        role: userRole,
+        phoneNumber: phone || '',
+        createdAt: new Date().toISOString()
+      };
+
+      if (userRole === 'tenant' && landlordId) {
+        userData.landlordId = landlordId;
+      }
+
+      const newUser = await userService.createUser(firebaseUid, userData);
+
+      console.log('✅ New user created:', newUser.uid);
+
+      return res.status(201).json({
+        status: 'success',
+        data: newUser
+      });
+    }
+
+    // User exists → Update profile
+    console.log('[Firebase Register] User exists — updating...');
+
+    const updateData = {
+      displayName: username || existingUser.displayName,
+      role: userRole,
+      phoneNumber: phone || existingUser.phoneNumber
+    };
+
+    if (userRole === 'tenant' && landlordId) {
+      updateData.landlordId = landlordId;
+    }
+
+    const updatedUser = await userService.updateUser(firebaseUid, updateData);
+
+    console.log('✅ User updated:', updatedUser.uid);
+
+    return res.json({
+      status: 'success',
+      data: updatedUser
+    });
+
+  } catch (error) {
+    console.error('❌ [Firebase Register] Exception:', error);
+    console.error('❌ Error stack:', error.stack);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Server error during registration',
+      details: error.message
+    });
+  }
 });
+
 
 // Login user
 router.post('/login', async (req, res) => {

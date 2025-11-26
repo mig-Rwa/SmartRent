@@ -100,6 +100,9 @@ export async function convertFirebaseUser(firebaseUser: FirebaseUser): Promise<U
 /**
  * Sign up a new user with email and password
  */
+/**
+ * Sign up a new user with email and password
+ */
 export async function signUpWithEmail(
   email: string,
   password: string,
@@ -113,51 +116,91 @@ export async function signUpWithEmail(
   }
 ) {
   try {
+    // Normalize email before creating account
+    const normalizedEmail = email.trim().toLowerCase();
+    
+    console.log('📝 Creating Firebase account with:', {
+      email: normalizedEmail,
+      role: userData.role,
+      username: userData.username
+    });
+    
     // Create Firebase Auth user
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    const userCredential = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
     const user = userCredential.user;
+
+    console.log('✅ Firebase user created:', user.uid);
 
     // Update display name
     await updateProfile(user, {
       displayName: `${userData.firstName} ${userData.lastName}`
     });
 
+    // IMPORTANT: Get the Firebase ID token
+    console.log('🔑 Getting Firebase ID token...');
+    const token = await user.getIdToken(true); // Force refresh
+    console.log('🔑 Token obtained, length:', token.length);
+
     // Call backend to register user in Firestore database (REQUIRED for role)
     try {
-      const token = await user.getIdToken();
       const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+      
+      const requestBody = {
+        username: userData.username,
+        first_name: userData.firstName,
+        last_name: userData.lastName,
+        phone: userData.phone || '',
+        role: userData.role,
+        landlordCode: userData.landlordCode
+      };
+      
+      console.log('📤 Sending to backend:', backendUrl + '/auth/firebase-register');
+      console.log('📤 Request body:', requestBody);
+      console.log('📤 Token (first 50 chars):', token.substring(0, 50) + '...');
+      
       const response = await fetch(`${backendUrl}/auth/firebase-register`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          'Authorization': `Bearer ${token}` // Use the token we just got
         },
-        body: JSON.stringify({
-          username: userData.username,
-          first_name: userData.firstName,
-          last_name: userData.lastName,
-          phone: userData.phone || '',
-          role: userData.role,
-          landlordCode: userData.landlordCode
-        })
+        body: JSON.stringify(requestBody)
       });
       
+      console.log('📥 Backend response status:', response.status);
+      
+      const responseText = await response.text();
+      console.log('📥 Backend response:', responseText);
+      
       if (response.ok) {
-        const result = await response.json();
+        const result = JSON.parse(responseText);
         console.log('✅ User registered in backend database with role:', result.data?.role);
+        return { user, error: null };
       } else {
-        const errorData = await response.json();
+        let errorData;
+        try {
+          errorData = JSON.parse(responseText);
+        } catch (e) {
+          errorData = { message: responseText || 'Unknown error' };
+        }
         console.error('❌ Backend registration failed:', errorData);
+        console.error('❌ Status code:', response.status);
+        
         // Delete Firebase user if backend registration fails
         await user.delete();
-        return { error: errorData.message || 'Registration failed. Please check your landlord ID.' };
+        return { error: errorData.message || 'Registration failed. Please check your details.' };
       }
     } catch (backendError) {
       console.error('⚠️ Backend registration error:', backendError);
-      console.log('ℹ️ User will be created with default role on first API call');
+      console.error('⚠️ Error details:', {
+        name: backendError instanceof Error ? backendError.name : 'unknown',
+        message: backendError instanceof Error ? backendError.message : String(backendError)
+      });
+      
+      // Delete the Firebase user since backend registration failed
+      await user.delete();
+      return { error: 'Backend server is not responding. Please make sure the server is running.' };
     }
-
-    return { user, error: null };
   } catch (error: any) {
     console.error('Sign up error:', error);
     let errorMessage = error.message;
@@ -178,18 +221,38 @@ export async function signUpWithEmail(
 /**
  * Sign in with email and password
  */
+/**
+ * Sign in with email and password
+ */
 export async function signInWithEmail(email: string, password: string) {
   try {
-    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    // Add logging to see exactly what we're sending
+    console.log('🔐 Attempting sign in with:', {
+      email: email,
+      emailLength: email.length,
+      passwordLength: password.length
+    });
+    
+    // Trim and normalize email
+    const normalizedEmail = email.trim().toLowerCase();
+    
+    console.log('🔐 Normalized email:', normalizedEmail);
+    
+    const userCredential = await signInWithEmailAndPassword(auth, normalizedEmail, password);
+    
+    console.log('✅ Sign in successful:', userCredential.user.uid);
+    
     return { user: userCredential.user, error: null };
   } catch (error: any) {
-    console.error('Sign in error:', error);
+    console.error('❌ Sign in error:', error.code, error.message);
     let errorMessage = 'Invalid email or password';
     
     if (error.code === 'auth/user-not-found') {
       errorMessage = 'No account found with this email';
     } else if (error.code === 'auth/wrong-password') {
       errorMessage = 'Incorrect password';
+    } else if (error.code === 'auth/invalid-credential') {
+      errorMessage = 'Invalid email or password. Please check your credentials.';
     } else if (error.code === 'auth/too-many-requests') {
       errorMessage = 'Too many failed attempts. Please try again later';
     }
