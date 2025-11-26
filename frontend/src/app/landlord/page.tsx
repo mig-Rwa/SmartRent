@@ -36,66 +36,89 @@ export default function Page(): React.JSX.Element {
   const [recentMaintenance, setRecentMaintenance] = React.useState<MaintenanceRequest[]>([]);
   const [loading, setLoading] = React.useState(true);
 
-  React.useEffect(() => {
-    async function fetchDashboardData() {
-      try {
-        setLoading(true);
+React.useEffect(() => {
+  async function fetchDashboardData() {
+    try {
+      setLoading(true);
 
-        // Fetch all data in parallel (payments endpoint not yet implemented for SmartRent)
-        const [properties, leases, maintenanceRequests] = await Promise.all([
-          propertiesApi.getAll().catch(() => []),
-          leasesApi.getAll().catch(() => []),
-          maintenanceApi.getAll().catch(() => []),
-        ]);
+      // Fetch all data in parallel
+      const [propertiesResponse, leasesResponse, maintenanceResponse] = await Promise.all([
+        propertiesApi.getAll().catch(() => ({ data: [] })),
+        leasesApi.getAll().catch(() => ({ data: [] })),
+        maintenanceApi.getAll().catch(() => ({ data: [] })),
+      ]);
+      
+      const extractArray = <T,>(response: T[] | { data: T[] } | any): T[] => {
+        if (Array.isArray(response)) {
+          return response;
+        }
+        if (response && typeof response === 'object' && 'data' in response && Array.isArray(response.data)) {
+          return response.data;
+        }
+        return [];
+      };
+
+      // Extract arrays from responses
+      const properties = extractArray<Property>(propertiesResponse);
+      const leases = extractArray<Lease>(leasesResponse);
+      const maintenanceRequests = extractArray<MaintenanceRequest>(maintenanceResponse);
         
-        // Payments API not yet implemented for SmartRent - use empty array
-        const payments: Payment[] = [];
+      // Payments API not yet implemented for SmartRent - use empty array
+      const payments: Payment[] = [];
 
-        // Calculate stats
-        const totalProperties = properties?.length || 0;
-        const activeLeases = leases?.filter((l: Lease) => l.status === 'active').length || 0;
-        const pendingMaintenance = maintenanceRequests?.filter((m: MaintenanceRequest) => m.status === 'pending' || m.status === 'in_progress').length || 0;
-        
-        // Calculate monthly revenue from current month payments
-        const now = new Date();
-        const currentMonth = now.getMonth();
-        const currentYear = now.getFullYear();
-        const monthlyRevenue = payments
-          ?.filter((p: Payment) => {
-            if (!p.payment_date) return false;
-            const paymentDate = new Date(p.payment_date);
-            return paymentDate.getMonth() === currentMonth && paymentDate.getFullYear() === currentYear;
-          })
-          .reduce((sum: number, p: Payment) => sum + Number(p.amount), 0) || 0;
+      console.log('Dashboard data:', { 
+        properties, 
+        leases, 
+        maintenanceRequests 
+      });
 
-        setStats({
-          totalProperties,
-          activeLeases,
-          pendingMaintenance,
-          monthlyRevenue,
-        });
+      // Calculate stats
+      const totalProperties = properties.length;
+      const activeLeases = leases.filter((l: Lease) => l.status === 'active').length;
+      const pendingMaintenance = maintenanceRequests.filter(
+        (m: MaintenanceRequest) => m.status === 'pending' || m.status === 'in_progress'
+      ).length;
+      
+      // Calculate monthly revenue from current month payments
+      const now = new Date();
+      const currentMonth = now.getMonth();
+      const currentYear = now.getFullYear();
+      const monthlyRevenue = payments
+        .filter((p: Payment) => {
+          if (!p.payment_date) return false;
+          const paymentDate = new Date(p.payment_date);
+          return paymentDate.getMonth() === currentMonth && paymentDate.getFullYear() === currentYear;
+        })
+        .reduce((sum: number, p: Payment) => sum + Number(p.amount), 0);
 
-        // Set recent leases (last 5)
-        const sortedLeases = (leases || [])
-          .sort((a: Lease, b: Lease) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime())
-          .slice(0, 5);
-        setRecentLeases(sortedLeases);
+      setStats({
+        totalProperties,
+        activeLeases,
+        pendingMaintenance,
+        monthlyRevenue,
+      });
 
-        // Set recent maintenance (last 5)
-        const sortedMaintenance = (maintenanceRequests || [])
-          .sort((a: MaintenanceRequest, b: MaintenanceRequest) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-          .slice(0, 5);
-        setRecentMaintenance(sortedMaintenance);
+      // Set recent leases (last 5)
+      const sortedLeases = leases
+        .sort((a: Lease, b: Lease) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime())
+        .slice(0, 5);
+      setRecentLeases(sortedLeases);
 
-      } catch (error) {
-        console.error('Failed to fetch dashboard data:', error);
-      } finally {
-        setLoading(false);
-      }
+      // Set recent maintenance (last 5)
+      const sortedMaintenance = maintenanceRequests
+        .sort((a: MaintenanceRequest, b: MaintenanceRequest) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .slice(0, 5);
+      setRecentMaintenance(sortedMaintenance);
+
+    } catch (error) {
+      console.error('Failed to fetch dashboard data:', error);
+    } finally {
+      setLoading(false);
     }
+  }
 
-    fetchDashboardData();
-  }, []);
+  fetchDashboardData();
+}, []);
 
   const getStatusColor = (status: string) => {
     switch (status) {

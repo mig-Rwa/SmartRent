@@ -1,33 +1,46 @@
 /**
  * Firebase Configuration for SmartRent
- * 
- * This file contains the Firebase/Firestore configuration for production deployment.
- * For local development, we use SQLite (see database.js)
- * 
- * Services used:
- * - Firestore: NoSQL database for storing properties, leases, payments, etc.
- * - Firebase Authentication: User authentication (optional, can use JWT)
- * - Cloud Storage: For storing images (property photos, maintenance request images)
- * - Cloud Messaging: Push notifications for rent reminders and updates
- * - Cloud Functions: Serverless backend functions
  */
 
 const admin = require('firebase-admin');
+const path = require('path');
 
 // Initialize Firebase Admin SDK
-// In production, use environment variable for service account
 let db = null;
 let storage = null;
 let messaging = null;
+let firebaseInitialized = false;
 
 const initializeFirebase = () => {
+    if (firebaseInitialized) {
+        console.log('ℹ️ Firebase already initialized');
+        return { db, storage, messaging, isFirebase: true };
+    }
+
     try {
         // Check if Firebase credentials are configured
         if (process.env.FIREBASE_PROJECT_ID) {
-            // Initialize with service account credentials
-            const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT 
-                ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
-                : require('../../firebase-service-account.json'); // Corrected path
+            console.log('🔥 Initializing Firebase with project:', process.env.FIREBASE_PROJECT_ID);
+            
+            let serviceAccount;
+            
+            // Try to get service account from environment variable first
+            if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+                console.log('📝 Using service account from environment variable');
+                serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+            } else {
+                // Try to load from file
+                try {
+                    const serviceAccountPath = path.join(__dirname, '../../firebase-service-account.json');
+                    console.log('📝 Loading service account from:', serviceAccountPath);
+                    serviceAccount = require(serviceAccountPath);
+                } catch (fileError) {
+                    // Try alternative path
+                    const altPath = path.join(__dirname, '../firebase-service-account.json');
+                    console.log('📝 Trying alternative path:', altPath);
+                    serviceAccount = require(altPath);
+                }
+            }
 
             if (!admin.apps.length) {
                 admin.initializeApp({
@@ -35,25 +48,25 @@ const initializeFirebase = () => {
                     projectId: process.env.FIREBASE_PROJECT_ID,
                     storageBucket: process.env.FIREBASE_STORAGE_BUCKET
                 });
+                console.log('✅ Firebase Admin SDK initialized');
             }
 
             db = admin.firestore();
             storage = admin.storage();
             messaging = admin.messaging();
+            firebaseInitialized = true;
 
-            console.log('✅ Firebase initialized successfully');
+            console.log('✅ Firebase services ready (Firestore, Storage, Messaging)');
             return { db, storage, messaging, isFirebase: true };
         } else {
-            console.log('ℹ️ Running without Firebase - using SQLite only');
-            // Use SQLite for development
-            const sqlite = require('./database');
-            return { db: sqlite, isFirebase: false };
+            console.error('❌ FIREBASE_PROJECT_ID not set in environment variables');
+            console.log('ℹ️ Running without Firebase - this will cause authentication errors');
+            return { db: null, isFirebase: false };
         }
     } catch (error) {
-        console.error('❌ Error initializing Firebase:', error);
-        console.log('⚠️ Falling back to SQLite database');
-        const sqlite = require('./database');
-        return { db: sqlite, isFirebase: false };
+        console.error('❌ Error initializing Firebase:', error.message);
+        console.error('❌ Stack trace:', error.stack);
+        throw error; // Don't silently fail - we need Firebase for auth
     }
 };
 
@@ -108,41 +121,9 @@ const firestoreHelpers = {
     }
 };
 
-// Example: Migration helper from SQLite to Firestore
-const migrateToFirestore = async (sqliteDb) => {
-    console.log('🔄 Starting migration from SQLite to Firestore...');
-    
-    try {
-        // Migrate users
-        const users = await new Promise((resolve, reject) => {
-            sqliteDb.all('SELECT * FROM users', (err, rows) => {
-                if (err) reject(err);
-                else resolve(rows);
-            });
-        });
-
-        const batch = db.batch();
-        users.forEach(user => {
-            const userRef = db.collection(COLLECTIONS.USERS).doc(user.id.toString());
-            batch.set(userRef, firestoreHelpers.withTimestamps(user));
-        });
-        await batch.commit();
-        console.log(`✅ Migrated ${users.length} users`);
-
-        // Similar migrations for other tables...
-        // This is just an example structure
-
-        console.log('✅ Migration completed successfully');
-    } catch (error) {
-        console.error('❌ Migration error:', error);
-        throw error;
-    }
-};
-
 module.exports = {
     initializeFirebase,
     COLLECTIONS,
     firestoreHelpers,
-    migrateToFirestore,
-    admin // Export admin for advanced usage
+    admin // Export admin for use in middleware
 };

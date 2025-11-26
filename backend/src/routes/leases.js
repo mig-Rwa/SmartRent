@@ -1,432 +1,307 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../config/database');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, requireLandlord } = require('../middleware/auth');
+const { admin } = require('../config/firebase');
 
-// Get all leases (filtered by user role)
-router.get('/', authenticateToken, (req, res) => {
-    const { role, userId } = req.user;
-    const { status, property_id } = req.query;
-
-    let query = `
-        SELECT l.*,
-               p.title as property_title,
-               p.address as property_address,
-               p.city as property_city,
-               t.username as tenant_name,
-               t.email as tenant_email,
-               t.phone as tenant_phone,
-               t.first_name as tenant_first_name,
-               t.last_name as tenant_last_name,
-               ll.username as landlord_name,
-               ll.email as landlord_email,
-               ll.phone as landlord_phone
-        FROM leases l
-        JOIN properties p ON l.property_id = p.id
-        JOIN users t ON l.tenant_id = t.id
-        JOIN users ll ON l.landlord_id = ll.id
-        WHERE 1=1
-    `;
-    const params = [];
-
-    // Filter based on role
-    if (role === 'tenant') {
-        query += ' AND l.tenant_id = ?';
-        params.push(userId);
-    } else if (role === 'landlord') {
-        query += ' AND l.landlord_id = ?';
-        params.push(userId);
+// GET /api/leases - Get all leases for the authenticated user
+router.get('/', authenticateToken, async (req, res) => {
+  try {
+    const { userId, role } = req.user;
+    const db = admin.firestore();
+    
+    console.log(`[GET /leases] User: ${userId}, Role: ${role}`);
+    
+    let leasesQuery;
+    
+    // Landlords see their own leases
+    if (role === 'landlord') {
+      leasesQuery = db.collection('leases').where('landlordId', '==', userId);
+    } 
+    // Tenants see only their leases
+    else if (role === 'tenant') {
+      leasesQuery = db.collection('leases').where('tenantId', '==', userId);
     }
-
-    // Additional filters
-    if (status) {
-        query += ' AND l.status = ?';
-        params.push(status);
+    // Admins see all
+    else {
+      leasesQuery = db.collection('leases');
     }
-
-    if (property_id) {
-        query += ' AND l.property_id = ?';
-        params.push(parseInt(property_id));
+    
+    const snapshot = await leasesQuery.get();
+    
+    if (snapshot.empty) {
+      return res.json({
+        status: 'success',
+        data: []
+      });
     }
-
-    query += ' ORDER BY l.created_at DESC';
-
-    db.all(query, params, (err, leases) => {
-        if (err) {
-            console.error('Error fetching leases:', err);
-            return res.status(500).json({ error: 'Failed to fetch leases' });
+    
+    const leases = [];
+    
+    // Enrich leases with property and tenant data
+    for (const doc of snapshot.docs) {
+      const leaseData = doc.data();
+      
+      // Get property details
+      let propertyData = null;
+      try {
+        const propertyDoc = await db.collection('properties').doc(leaseData.propertyId).get();
+        if (propertyDoc.exists) {
+          propertyData = propertyDoc.data();
         }
-
-        res.json(leases);
+      } catch (err) {
+        console.error('Error fetching property:', err);
+      }
+      
+      // Get tenant details
+      let tenantData = null;
+      try {
+        const tenantDoc = await db.collection('users').doc(leaseData.tenantId).get();
+        if (tenantDoc.exists) {
+          tenantData = tenantDoc.data();
+        }
+      } catch (err) {
+        console.error('Error fetching tenant:', err);
+      }
+      
+      leases.push({
+        id: doc.id,
+        ...leaseData,
+        // Property details
+        propertyTitle: propertyData?.title,
+        propertyAddress: propertyData?.address,
+        propertyCity: propertyData?.city,
+        // Tenant details
+        tenantName: tenantData?.displayName,
+        tenantEmail: tenantData?.email,
+        tenantPhone: tenantData?.phoneNumber
+      });
+    }
+    
+    res.json({
+      status: 'success',
+      data: leases
     });
+  } catch (error) {
+    console.error('[GET /leases] Error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch leases',
+      details: error.message
+    });
+  }
 });
 
-// Get lease by ID
-router.get('/:id', authenticateToken, (req, res) => {
-    const { id } = req.params;
-    const { role, userId } = req.user;
-
-    const query = `
-        SELECT l.*,
-               p.title as property_title,
-               p.description as property_description,
-               p.address as property_address,
-               p.city as property_city,
-               p.state as property_state,
-               p.zip_code as property_zip_code,
-               p.property_type,
-               p.bedrooms,
-               p.bathrooms,
-               p.square_feet,
-               t.username as tenant_name,
-               t.email as tenant_email,
-               t.phone as tenant_phone,
-               t.first_name as tenant_first_name,
-               t.last_name as tenant_last_name,
-               ll.username as landlord_name,
-               ll.email as landlord_email,
-               ll.phone as landlord_phone,
-               ll.first_name as landlord_first_name,
-               ll.last_name as landlord_last_name
-        FROM leases l
-        JOIN properties p ON l.property_id = p.id
-        JOIN users t ON l.tenant_id = t.id
-        JOIN users ll ON l.landlord_id = ll.id
-        WHERE l.id = ?
-    `;
-
-    db.get(query, [id], (err, lease) => {
-        if (err) {
-            console.error('Error fetching lease:', err);
-            return res.status(500).json({ error: 'Failed to fetch lease' });
-        }
-
-        if (!lease) {
-            return res.status(404).json({ error: 'Lease not found' });
-        }
-
-        // Check authorization
-        if (role === 'tenant' && lease.tenant_id !== userId) {
-            return res.status(403).json({ error: 'Unauthorized' });
-        }
-        if (role === 'landlord' && lease.landlord_id !== userId) {
-            return res.status(403).json({ error: 'Unauthorized' });
-        }
-
-        res.json(lease);
-    });
-});
-
-// Create new lease (landlord only)
-router.post('/', authenticateToken, (req, res) => {
-    const { role, userId } = req.user;
-
-    if (role !== 'landlord') {
-        return res.status(403).json({ error: 'Only landlords can create leases' });
-    }
-
+// POST /api/leases - Create new lease
+// POST /api/leases - Create new lease
+// POST /api/leases - Create new lease
+router.post('/', authenticateToken, requireLandlord, async (req, res) => {
+  try {
+    const landlordId = req.user.userId;
     const {
-        property_id, tenant_id, start_date, end_date,
-        monthly_rent, security_deposit, utilities_cost,
-        payment_due_day, lease_document_url, notes
+      property_id,
+      tenant_id,
+      start_date,
+      end_date,
+      monthly_rent,
+      security_deposit,
+      utilities_cost,
+      payment_due_day,
+      status,
+      notes
     } = req.body;
 
-    // Validation
-    if (!property_id || !tenant_id || !start_date || !end_date || !monthly_rent) {
-        return res.status(400).json({ error: 'Missing required fields' });
+    console.log('[POST /leases] Creating lease:', {
+      landlordId,
+      property_id,
+      property_id_type: typeof property_id,
+      tenant_id,
+      start_date,
+      end_date
+    });
+
+    // Validate property_id is not empty
+    if (!property_id || property_id === '') {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Property ID is required'
+      });
     }
 
-    // Verify the property belongs to this landlord
-    db.get('SELECT * FROM properties WHERE id = ? AND landlord_id = ?', [property_id, userId], (err, property) => {
-        if (err) {
-            console.error('Error fetching property:', err);
-            return res.status(500).json({ error: 'Failed to fetch property' });
-        }
+    const db = admin.firestore();
 
-        if (!property) {
-            return res.status(404).json({ error: 'Property not found or unauthorized' });
-        }
+    // Convert to string if needed
+    const propertyIdString = String(property_id);
+    
+    console.log('[POST /leases] Looking for property with ID:', propertyIdString);
 
-        // Verify tenant exists and has tenant role
-        db.get('SELECT * FROM users WHERE id = ? AND role = "tenant"', [tenant_id], (err, tenant) => {
-            if (err) {
-                console.error('Error fetching tenant:', err);
-                return res.status(500).json({ error: 'Failed to fetch tenant' });
-            }
+    // Verify property exists and belongs to landlord in Firestore
+    const propertyDoc = await db.collection('properties').doc(propertyIdString).get();
+    
+    if (!propertyDoc.exists) {
+      console.error('[POST /leases] Property not found in Firestore with ID:', propertyIdString);
+      return res.status(404).json({
+        status: 'error',
+        message: 'Property not found'
+      });
+    }
 
-            if (!tenant) {
-                return res.status(404).json({ error: 'Tenant not found' });
-            }
+    const propertyData = propertyDoc.data(); // ✅ Declare it here
+    
+    if (propertyData.landlordId !== landlordId) {
+      console.error('[POST /leases] Property does not belong to landlord');
+      return res.status(403).json({
+        status: 'error',
+        message: 'You do not own this property'
+      });
+    }
 
-            // Check for overlapping active leases for this property
-            db.get(
-                'SELECT * FROM leases WHERE property_id = ? AND status = "active"',
-                [property_id],
-                (err, existingLease) => {
-                    if (err) {
-                        console.error('Error checking existing leases:', err);
-                        return res.status(500).json({ error: 'Failed to check existing leases' });
-                    }
+    // Verify tenant exists in Firestore
+    const tenantDoc = await db.collection('users').doc(tenant_id).get();
+    
+    if (!tenantDoc.exists) {
+      console.error('[POST /leases] Tenant not found');
+      return res.status(404).json({
+        status: 'error',
+        message: 'Tenant not found'
+      });
+    }
 
-                    if (existingLease) {
-                        return res.status(400).json({ 
-                            error: 'Property already has an active lease',
-                            existingLeaseId: existingLease.id
-                        });
-                    }
+    const tenantData = tenantDoc.data(); // ✅ Declare it here
+    
+    if (tenantData.role !== 'tenant') {
+      console.error('[POST /leases] User is not a tenant');
+      return res.status(400).json({
+        status: 'error',
+        message: 'Selected user is not a tenant'
+      });
+    }
 
-                    // Create the lease
-                    const query = `
-                        INSERT INTO leases (
-                            property_id, tenant_id, landlord_id, start_date, end_date,
-                            monthly_rent, security_deposit, utilities_cost, payment_due_day,
-                            lease_document_url, notes
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    `;
+    // Verify tenant belongs to this landlord
+    if (tenantData.landlordId !== landlordId) {
+      console.error('[POST /leases] Tenant does not belong to this landlord');
+      return res.status(403).json({
+        status: 'error',
+        message: 'This tenant is not registered with you'
+      });
+    }
 
-                    const params = [
-                        property_id, tenant_id, userId, start_date, end_date,
-                        parseFloat(monthly_rent),
-                        security_deposit ? parseFloat(security_deposit) : null,
-                        utilities_cost ? parseFloat(utilities_cost) : 0,
-                        payment_due_day || 1,
-                        lease_document_url || null,
-                        notes || null
-                    ];
+    // Create the lease in Firestore
+    const leaseData = {
+      propertyId: propertyIdString,
+      tenantId: tenant_id,
+      landlordId: landlordId,
+      startDate: start_date,
+      endDate: end_date,
+      monthlyRent: parseFloat(monthly_rent),
+      securityDeposit: parseFloat(security_deposit),
+      utilitiesCost: parseFloat(utilities_cost) || 0,
+      paymentDueDay: parseInt(payment_due_day),
+      status: status || 'pending',
+      notes: notes || '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
 
-                    db.run(query, params, function(err) {
-                        if (err) {
-                            console.error('Error creating lease:', err);
-                            return res.status(500).json({ error: 'Failed to create lease' });
-                        }
+    const leaseRef = await db.collection('leases').add(leaseData);
+    
+    console.log('[POST /leases] ✅ Lease created with ID:', leaseRef.id);
 
-                        // Update property status to occupied
-                        db.run('UPDATE properties SET status = "occupied" WHERE id = ?', [property_id]);
-
-                        // Create notification for tenant
-                        const notifQuery = `
-                            INSERT INTO notifications (user_id, type, title, message, related_id, related_type)
-                            VALUES (?, 'general', 'New Lease Agreement', 'A new lease agreement has been created for you', ?, 'lease')
-                        `;
-                        db.run(notifQuery, [tenant_id, this.lastID]);
-
-                        res.status(201).json({
-                            message: 'Lease created successfully',
-                            leaseId: this.lastID
-                        });
-                    });
-                }
-            );
-        });
+    // Return the created lease with enriched data
+    res.status(201).json({
+      status: 'success',
+      message: 'Lease created successfully',
+      data: {
+        id: leaseRef.id,
+        ...leaseData,
+        // Add property details
+        propertyTitle: propertyData.title,
+        propertyAddress: propertyData.address,
+        // Add tenant details
+        tenantName: tenantData.displayName,
+        tenantEmail: tenantData.email
+      }
     });
+  } catch (error) {
+    console.error('[POST /leases] ❌ Error creating lease:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to create lease',
+      details: error.message
+    });
+  }
 });
 
-// Update lease (landlord only)
-router.put('/:id', authenticateToken, (req, res) => {
-    const { role, userId } = req.user;
+// PATCH /api/leases/:id/status - Update lease status (tenant accepts/rejects)
+router.patch('/:id/status', authenticateToken, async (req, res) => {
+  try {
     const { id } = req.params;
-
-    if (role !== 'landlord') {
-        return res.status(403).json({ error: 'Only landlords can update leases' });
+    const { status } = req.body;
+    const { userId, role } = req.user;
+    
+    console.log(`[PATCH /leases/:id/status] User ${userId} updating lease ${id} to ${status}`);
+    
+    if (!status || !['active', 'terminated'].includes(status)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid status. Must be "active" or "terminated"'
+      });
     }
-
-    // Fetch the lease and verify ownership
-    db.get('SELECT * FROM leases WHERE id = ? AND landlord_id = ?', [id, userId], (err, lease) => {
-        if (err) {
-            console.error('Error fetching lease:', err);
-            return res.status(500).json({ error: 'Failed to fetch lease' });
-        }
-
-        if (!lease) {
-            return res.status(404).json({ error: 'Lease not found or unauthorized' });
-        }
-
-        const {
-            start_date, end_date, monthly_rent, security_deposit,
-            utilities_cost, payment_due_day, status, lease_document_url, notes
-        } = req.body;
-
-        const updates = [];
-        const params = [];
-
-        if (start_date) { updates.push('start_date = ?'); params.push(start_date); }
-        if (end_date) { updates.push('end_date = ?'); params.push(end_date); }
-        if (monthly_rent) { updates.push('monthly_rent = ?'); params.push(parseFloat(monthly_rent)); }
-        if (security_deposit !== undefined) { 
-            updates.push('security_deposit = ?'); 
-            params.push(security_deposit ? parseFloat(security_deposit) : null); 
-        }
-        if (utilities_cost !== undefined) { 
-            updates.push('utilities_cost = ?'); 
-            params.push(parseFloat(utilities_cost)); 
-        }
-        if (payment_due_day) { updates.push('payment_due_day = ?'); params.push(parseInt(payment_due_day)); }
-        if (status) { updates.push('status = ?'); params.push(status); }
-        if (lease_document_url) { updates.push('lease_document_url = ?'); params.push(lease_document_url); }
-        if (notes !== undefined) { updates.push('notes = ?'); params.push(notes); }
-
-        if (updates.length === 0) {
-            return res.status(400).json({ error: 'No fields to update' });
-        }
-
-        updates.push('updated_at = CURRENT_TIMESTAMP');
-        params.push(id);
-
-        const query = `UPDATE leases SET ${updates.join(', ')} WHERE id = ?`;
-
-        db.run(query, params, function(err) {
-            if (err) {
-                console.error('Error updating lease:', err);
-                return res.status(500).json({ error: 'Failed to update lease' });
-            }
-
-            // If status changed to terminated/expired, update property status
-            if (status && (status === 'terminated' || status === 'expired')) {
-                db.run('UPDATE properties SET status = "available" WHERE id = ?', [lease.property_id]);
-            } else if (status === 'active') {
-                db.run('UPDATE properties SET status = "occupied" WHERE id = ?', [lease.property_id]);
-            }
-
-            // Notify tenant if status changed
-            if (status && status !== lease.status) {
-                const notifQuery = `
-                    INSERT INTO notifications (user_id, type, title, message, related_id, related_type)
-                    VALUES (?, 'general', 'Lease Status Updated', 'Your lease status has been updated to: ${status}', ?, 'lease')
-                `;
-                db.run(notifQuery, [lease.tenant_id, id]);
-            }
-
-            res.json({ message: 'Lease updated successfully' });
-        });
-    });
-});
-
-// Delete/Terminate lease (landlord only)
-router.delete('/:id', authenticateToken, (req, res) => {
-    const { role, userId } = req.user;
-    const { id } = req.params;
-
-    if (role !== 'landlord') {
-        return res.status(403).json({ error: 'Only landlords can delete leases' });
+    
+    const db = admin.firestore();
+    const leaseDoc = await db.collection('leases').doc(id).get();
+    
+    if (!leaseDoc.exists) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Lease not found'
+      });
     }
-
-    // Fetch the lease and verify ownership
-    db.get('SELECT * FROM leases WHERE id = ? AND landlord_id = ?', [id, userId], (err, lease) => {
-        if (err) {
-            console.error('Error fetching lease:', err);
-            return res.status(500).json({ error: 'Failed to fetch lease' });
-        }
-
-        if (!lease) {
-            return res.status(404).json({ error: 'Lease not found or unauthorized' });
-        }
-
-        // Instead of deleting, we'll mark as terminated
-        db.run(
-            'UPDATE leases SET status = "terminated", updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-            [id],
-            function(err) {
-                if (err) {
-                    console.error('Error terminating lease:', err);
-                    return res.status(500).json({ error: 'Failed to terminate lease' });
-                }
-
-                // Update property status
-                db.run('UPDATE properties SET status = "available" WHERE id = ?', [lease.property_id]);
-
-                // Notify tenant
-                const notifQuery = `
-                    INSERT INTO notifications (user_id, type, title, message, related_id, related_type)
-                    VALUES (?, 'general', 'Lease Terminated', 'Your lease has been terminated', ?, 'lease')
-                `;
-                db.run(notifQuery, [lease.tenant_id, id]);
-
-                res.json({ message: 'Lease terminated successfully' });
-            }
-        );
-    });
-});
-
-// Get leases for a specific property (landlord only)
-router.get('/property/:propertyId', authenticateToken, (req, res) => {
-    const { role, userId } = req.user;
-    const { propertyId } = req.params;
-
-    if (role !== 'landlord') {
-        return res.status(403).json({ error: 'Unauthorized' });
+    
+    const leaseData = leaseDoc.data();
+    
+    // Tenants can only update their own leases
+    if (role === 'tenant' && leaseData.tenantId !== userId) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Unauthorized'
+      });
     }
-
-    // Verify property belongs to landlord
-    db.get('SELECT * FROM properties WHERE id = ? AND landlord_id = ?', [propertyId, userId], (err, property) => {
-        if (err) {
-            console.error('Error fetching property:', err);
-            return res.status(500).json({ error: 'Failed to fetch property' });
-        }
-
-        if (!property) {
-            return res.status(404).json({ error: 'Property not found or unauthorized' });
-        }
-
-        const query = `
-            SELECT l.*,
-                   t.username as tenant_name,
-                   t.email as tenant_email,
-                   t.phone as tenant_phone,
-                   t.first_name as tenant_first_name,
-                   t.last_name as tenant_last_name
-            FROM leases l
-            JOIN users t ON l.tenant_id = t.id
-            WHERE l.property_id = ?
-            ORDER BY l.created_at DESC
-        `;
-
-        db.all(query, [propertyId], (err, leases) => {
-            if (err) {
-                console.error('Error fetching leases:', err);
-                return res.status(500).json({ error: 'Failed to fetch leases' });
-            }
-
-            res.json(leases);
-        });
-    });
-});
-
-// Get leases for a specific tenant
-router.get('/tenant/:tenantId', authenticateToken, (req, res) => {
-    const { role, userId } = req.user;
-    const { tenantId } = req.params;
-
-    // Tenants can only view their own leases
-    if (role === 'tenant' && parseInt(tenantId) !== userId) {
-        return res.status(403).json({ error: 'Unauthorized' });
+    
+    // Landlords can only update their own leases
+    if (role === 'landlord' && leaseData.landlordId !== userId) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Unauthorized'
+      });
     }
-
-    const query = `
-        SELECT l.*,
-               p.title as property_title,
-               p.address as property_address,
-               p.city as property_city,
-               p.state as property_state,
-               ll.username as landlord_name,
-               ll.email as landlord_email,
-               ll.phone as landlord_phone,
-               ll.first_name as landlord_first_name,
-               ll.last_name as landlord_last_name
-        FROM leases l
-        JOIN properties p ON l.property_id = p.id
-        JOIN users ll ON l.landlord_id = ll.id
-        WHERE l.tenant_id = ?
-        ORDER BY l.created_at DESC
-    `;
-
-    db.all(query, [tenantId], (err, leases) => {
-        if (err) {
-            console.error('Error fetching leases:', err);
-            return res.status(500).json({ error: 'Failed to fetch leases' });
-        }
-
-        res.json(leases);
+    
+    // Update the lease status
+    await db.collection('leases').doc(id).update({
+      status: status,
+      updatedAt: new Date().toISOString()
     });
+    
+    console.log(`[PATCH /leases/:id/status] ✅ Lease ${id} status updated to ${status}`);
+    
+    // Get updated lease
+    const updatedDoc = await db.collection('leases').doc(id).get();
+    
+    res.json({
+      status: 'success',
+      message: `Lease ${status === 'active' ? 'accepted' : 'terminated'} successfully`,
+      data: {
+        id: updatedDoc.id,
+        ...updatedDoc.data()
+      }
+    });
+  } catch (error) {
+    console.error('[PATCH /leases/:id/status] Error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to update lease status',
+      details: error.message
+    });
+  }
 });
 
 module.exports = router;

@@ -4,10 +4,10 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '');
 const nextConfig = {
   reactStrictMode: true,
 
-  // Temporarily skip ESLint during builds on Vercel to avoid plugin/version crashes
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
+  // // Temporarily skip ESLint during builds on Vercel to avoid plugin/version crashes
+  // eslint: {
+  //   ignoreDuringBuilds: true,
+  // },
 
   images: {
     remotePatterns: [
